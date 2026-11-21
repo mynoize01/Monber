@@ -1,0 +1,8 @@
+{
+  "name": "Monber v3",
+  "description": "Aplikasi responsive untuk menampilkan, mencari, menyaring, dan mengurutkan data nasabah Intrakom dan Ekstrakom secara real-time dari Google Sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
