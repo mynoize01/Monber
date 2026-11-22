@@ -162,7 +162,7 @@ fun SpLetterDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                painter = painterResource(id = R.drawable.logo2),
+                                painter = painterResource(id = R.drawable.monber8),
                                 contentDescription = "BRI Logo",
                                 tint = Color.Unspecified,
                                 modifier = Modifier.size(40.dp)

@@ -36,7 +36,13 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.Manifest
+import android.content.Intent
+import android.os.Build
+import com.example.BuildConfig
 import com.example.ui.viewmodel.CustomerViewModel
+import com.example.update.AppUpdateManager
+import com.example.update.AppUpdateState
 
 @Composable
 fun SettingsScreenView(
@@ -63,6 +69,47 @@ fun SettingsScreenView(
     val offlineNameKUrl1 by viewModel.offlineNameKUrl1.collectAsState()
     val offlineNameDi319Url by viewModel.offlineNameDi319Url.collectAsState()
     val offlineNameLw325Daily by viewModel.offlineNameLw325Daily.collectAsState()
+
+    // App Update (GitHub Releases: https://github.com/mynoize01/Monber.git)
+    val appUpdateState by viewModel.appUpdateState.collectAsState()
+    var hasManualUpdateCheck by remember { mutableStateOf(false) }
+
+    LaunchedEffect(appUpdateState) {
+        if (!hasManualUpdateCheck) return@LaunchedEffect
+        when (val state = appUpdateState) {
+            is AppUpdateState.UpToDate -> {
+                Toast.makeText(
+                    context,
+                    "Aplikasi sudah versi terbaru (v${state.currentVersion})",
+                    Toast.LENGTH_SHORT
+                ).show()
+                hasManualUpdateCheck = false
+            }
+            is AppUpdateState.Error -> {
+                Toast.makeText(context, state.message, Toast.LENGTH_LONG).show()
+                hasManualUpdateCheck = false
+            }
+            is AppUpdateState.ReadyToInstall, is AppUpdateState.NeedsInstallPermission -> {
+                hasManualUpdateCheck = false
+            }
+            else -> Unit
+        }
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val state = appUpdateState
+        if (granted && state is AppUpdateState.UpdateAvailable) {
+            AppUpdateManager.showUpdateNotification(context, state.release)
+        }
+    }
+
+    val installPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        viewModel.retryInstallAfterPermissionGranted()
+    }
 
     // Monthly Links
     val url1 by viewModel.url1.collectAsState()
@@ -1135,6 +1182,99 @@ fun SettingsScreenView(
             }
         }
 
+        // 6. Tombol Check for Update (Berdiri Sendiri di Bawah Tombol Refresh tanpa Kotak Background)
+        val isUpdateBusy = appUpdateState is AppUpdateState.Checking || appUpdateState is AppUpdateState.Downloading
+        Button(
+            onClick = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    !AppUpdateManager.hasNotificationPermission(context)
+                ) {
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                when (val state = appUpdateState) {
+                    is AppUpdateState.NeedsInstallPermission -> {
+                        installPermissionLauncher.launch(
+                            AppUpdateManager.createInstallPermissionIntent(context)
+                        )
+                    }
+                    is AppUpdateState.ReadyToInstall -> {
+                        if (AppUpdateManager.canRequestPackageInstalls(context)) {
+                            AppUpdateManager.launchApkInstaller(context, state.apkFile)
+                        } else {
+                            installPermissionLauncher.launch(
+                                AppUpdateManager.createInstallPermissionIntent(context)
+                            )
+                        }
+                    }
+                    else -> {
+                        hasManualUpdateCheck = true
+                        viewModel.checkForUpdates(
+                            autoInstallOnFind = true,
+                            isAutoBackgroundCheck = false
+                        )
+                    }
+                }
+            },
+            enabled = !isUpdateBusy,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF005FAF),
+                disabledContainerColor = Color(0xFF005FAF).copy(alpha = 0.7f)
+            ),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .testTag("check_for_update_button")
+        ) {
+            when (val state = appUpdateState) {
+                is AppUpdateState.Checking -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Memeriksa Pembaruan...", fontWeight = FontWeight.Bold)
+                }
+                is AppUpdateState.Downloading -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Mengunduh ${state.progressPercent}%...", fontWeight = FontWeight.Bold)
+                }
+                is AppUpdateState.NeedsInstallPermission -> {
+                    Icon(
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = "Izinkan Instalasi",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Izinkan & Instal Update", fontWeight = FontWeight.Bold)
+                }
+                is AppUpdateState.ReadyToInstall -> {
+                    Icon(
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = "Instal Pembaruan",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Instal Update (${state.release.tagName})", fontWeight = FontWeight.Bold)
+                }
+                else -> {
+                    Icon(
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = "Check for Update",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Check for Update", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
         // Branding & App Build (Terpisah Mandiri di Luar Kolom Kotak Akses PN)
         Column(
             modifier = Modifier
@@ -1187,7 +1327,7 @@ fun SettingsScreenView(
             }
 
             Text(
-                text = "App build ver. 3.0.8",
+                text = "App build ver. ${BuildConfig.VERSION_NAME}",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = Color(0xFF64748B)

@@ -24,6 +24,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import com.example.data.network.SpreadsheetService
 import com.example.data.local.LocalSummaryCache
+import com.example.update.AppUpdateManager
+import com.example.update.AppUpdateState
+import com.example.update.GitHubReleaseInfo
 
 enum class SortColumn {
     NAMA_NASABAH, PLAFOND, OS_PINJAMAN, UPDATE_POKOK, SETOR_POKOK, SEGMEN, KOLEK, UMUR_TGK, KOL_BY_LW, NAMA_MANTRI, NPD, ALAMAT, DESA, ALIH_TAGIH, SISA_BUNGA, TOTAL_DH
@@ -165,6 +168,14 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     )
     
     val isOfflineModeEnabled = MutableStateFlow(sharedPrefs.getBoolean("is_offline_mode_enabled", false))
+    val githubUpdateRepo = MutableStateFlow(
+        sharedPrefs.getString("github_update_repo", "")
+            ?.ifBlank { "https://github.com/mynoize01/Monber.git" }
+            ?: "https://github.com/mynoize01/Monber.git"
+    )
+    val appUpdateState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
+    val showUpdateDialog = MutableStateFlow(false)
+    private var updateJob: kotlinx.coroutines.Job? = null
     val offlineNameUrl1 = MutableStateFlow(sharedPrefs.getString("offline_name_url_1", "") ?: "")
     val offlineNameUrl2 = MutableStateFlow(sharedPrefs.getString("offline_name_url_2", "") ?: "")
     val offlineNameUrl3 = MutableStateFlow(sharedPrefs.getString("offline_name_url_3", "") ?: "")
@@ -2741,6 +2752,10 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         }
+        if (githubUpdateRepo.value.isBlank()) {
+            saveGithubUpdateRepo("https://github.com/mynoize01/Monber.git")
+        }
+        checkForUpdates(autoInstallOnFind = false, isAutoBackgroundCheck = true)
     }
 
     fun loadDailyDataForFilter() {
@@ -3397,4 +3412,143 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         val seg3Count: Int = 0,
         val allSegments: List<Triple<String, Double, Int>> = emptyList()
     )
+
+    fun saveGithubUpdateRepo(repo: String) {
+        val cleaned = repo.trim()
+        githubUpdateRepo.value = cleaned
+        sharedPrefs.edit().putString("github_update_repo", cleaned).apply()
+    }
+
+    fun openUpdateDialog() {
+        showUpdateDialog.value = true
+    }
+
+    fun dismissUpdateDialog() {
+        showUpdateDialog.value = false
+    }
+
+    fun clearUpdateStatus() {
+        val current = appUpdateState.value
+        if (current !is AppUpdateState.Checking && current !is AppUpdateState.Downloading) {
+            appUpdateState.value = AppUpdateState.Idle
+        }
+    }
+
+    fun checkForUpdates(
+        autoInstallOnFind: Boolean = false,
+        isAutoBackgroundCheck: Boolean = false
+    ) {
+        val repo = githubUpdateRepo.value.trim().ifBlank { "https://github.com/mynoize01/Monber.git" }
+        if (githubUpdateRepo.value.isBlank()) {
+            saveGithubUpdateRepo(repo)
+        }
+
+        val curState = appUpdateState.value
+        if (curState is AppUpdateState.Checking || curState is AppUpdateState.Downloading) {
+            return
+        }
+
+        updateJob?.cancel()
+        updateJob = viewModelScope.launch {
+            if (!isAutoBackgroundCheck) {
+                appUpdateState.value = AppUpdateState.Checking
+            }
+            val result = AppUpdateManager.fetchLatestRelease(repo)
+            result.onSuccess { release ->
+                val appContext = getApplication<Application>()
+                val currentVersion = AppUpdateManager.getCurrentVersionName(appContext)
+                if (AppUpdateManager.isNewerVersion(release.tagName, currentVersion)) {
+                    AppUpdateManager.showUpdateNotification(appContext, release)
+                    showUpdateDialog.value = true
+                    if (autoInstallOnFind && !release.apkDownloadUrl.isNullOrBlank()) {
+                        startDownloadAndInstallInternal(release)
+                    } else {
+                        appUpdateState.value = AppUpdateState.UpdateAvailable(release)
+                    }
+                } else {
+                    appUpdateState.value = if (isAutoBackgroundCheck) {
+                        AppUpdateState.Idle
+                    } else {
+                        AppUpdateState.UpToDate(currentVersion)
+                    }
+                }
+            }.onFailure { error ->
+                appUpdateState.value = if (isAutoBackgroundCheck) {
+                    AppUpdateState.Idle
+                } else {
+                    AppUpdateState.Error(error.message ?: "Gagal memeriksa pembaruan dari GitHub.")
+                }
+            }
+        }
+    }
+
+    fun downloadAndInstallUpdate(release: GitHubReleaseInfo) {
+        if (appUpdateState.value is AppUpdateState.Downloading) return
+        updateJob?.cancel()
+        updateJob = viewModelScope.launch {
+            startDownloadAndInstallInternal(release)
+        }
+    }
+
+    private suspend fun startDownloadAndInstallInternal(release: GitHubReleaseInfo) {
+        val appContext = getApplication<Application>()
+        val totalMbEstimate = if (release.apkSizeBytes > 0) release.apkSizeBytes / (1024f * 1024f) else 0f
+        appUpdateState.value = AppUpdateState.Downloading(
+            release = release,
+            progressPercent = 0,
+            downloadedMb = 0f,
+            totalMb = totalMbEstimate
+        )
+
+        val downloadResult = AppUpdateManager.downloadApk(
+            context = appContext,
+            release = release,
+            onProgress = { percent, downloadedMb, totalMb ->
+                appUpdateState.value = AppUpdateState.Downloading(
+                    release = release,
+                    progressPercent = percent,
+                    downloadedMb = downloadedMb,
+                    totalMb = totalMb
+                )
+            }
+        )
+
+        downloadResult.onSuccess { apkFile ->
+            if (AppUpdateManager.canRequestPackageInstalls(appContext)) {
+                val launched = AppUpdateManager.launchApkInstaller(appContext, apkFile)
+                appUpdateState.value = if (launched) {
+                    AppUpdateState.ReadyToInstall(release, apkFile)
+                } else {
+                    AppUpdateState.Error("Gagal membuka penginstal aplikasi.")
+                }
+            } else {
+                appUpdateState.value = AppUpdateState.NeedsInstallPermission(release, apkFile)
+                showUpdateDialog.value = true
+            }
+        }.onFailure { error ->
+            appUpdateState.value = AppUpdateState.Error(error.message ?: "Gagal mengunduh file APK pembaruan.")
+        }
+    }
+
+    fun retryInstallAfterPermissionGranted() {
+        val appContext = getApplication<Application>()
+        when (val state = appUpdateState.value) {
+            is AppUpdateState.NeedsInstallPermission -> {
+                if (AppUpdateManager.canRequestPackageInstalls(appContext)) {
+                    val launched = AppUpdateManager.launchApkInstaller(appContext, state.apkFile)
+                    if (launched) {
+                        appUpdateState.value = AppUpdateState.ReadyToInstall(state.release, state.apkFile)
+                    }
+                }
+            }
+            is AppUpdateState.ReadyToInstall -> {
+                if (AppUpdateManager.canRequestPackageInstalls(appContext)) {
+                    AppUpdateManager.launchApkInstaller(appContext, state.apkFile)
+                } else {
+                    appUpdateState.value = AppUpdateState.NeedsInstallPermission(state.release, state.apkFile)
+                }
+            }
+            else -> Unit
+        }
+    }
 }

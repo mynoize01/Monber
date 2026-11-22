@@ -88,7 +88,7 @@ object SuratSpGenerator {
 
     fun getLogoBase64(context: Context): String {
         return try {
-            val bitmap = BitmapFactory.decodeResource(context.resources, com.example.R.drawable.logo2)
+            val bitmap = BitmapFactory.decodeResource(context.resources, com.example.R.drawable.monber8)
             val stream = ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
             Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)

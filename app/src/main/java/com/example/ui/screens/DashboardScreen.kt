@@ -86,8 +86,13 @@ import java.text.NumberFormat
 import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import android.widget.Toast
+import android.Manifest
+import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.widget.Toast
+import com.example.update.AppUpdateManager
+import com.example.update.AppUpdateState
 
 fun formatDoubleClean(value: Double, formatter: NumberFormat): String {
     val formatted = formatter.format(value)
@@ -643,6 +648,34 @@ fun DashboardScreen(
     var navSwitchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
+    val appUpdateState by viewModel.appUpdateState.collectAsState()
+    val showUpdateDialog by viewModel.showUpdateDialog.collectAsState()
+
+    val updateNotificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val state = appUpdateState
+        if (granted && state is AppUpdateState.UpdateAvailable) {
+            AppUpdateManager.showUpdateNotification(context, state.release)
+        }
+    }
+
+    val updateInstallPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        viewModel.retryInstallAfterPermissionGranted()
+    }
+
+    LaunchedEffect(appUpdateState) {
+        val state = appUpdateState
+        if (state is AppUpdateState.UpdateAvailable &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !AppUpdateManager.hasNotificationPermission(context)
+        ) {
+            updateNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
     val calendarInstance = remember { java.util.Calendar.getInstance() }
     val datePickerDialog = remember {
         android.app.DatePickerDialog(
@@ -737,7 +770,7 @@ fun DashboardScreen(
                                 verticalArrangement = Arrangement.Center
                             ) {
                                 androidx.compose.foundation.Image(
-                                    painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.monber4),
+                                    painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.monber9),
                                     contentDescription = "Logo MonBer",
                                     contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                                     modifier = Modifier
@@ -776,6 +809,52 @@ fun DashboardScreen(
                         .height(3.dp)
                         .background(Color.White.copy(alpha = 0.2f))
                 )
+            }
+
+            // Automatic In-App Update Notification Banner if available and dialog was dismissed
+            val availableUpdateRelease = (appUpdateState as? AppUpdateState.UpdateAvailable)?.release
+            androidx.compose.animation.AnimatedVisibility(
+                visible = availableUpdateRelease != null && !showUpdateDialog
+            ) {
+                availableUpdateRelease?.let { release ->
+                    Surface(
+                        color = Color(0xFFFFF7ED),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.openUpdateDialog() }
+                            .testTag("update_available_banner")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SystemUpdate,
+                                contentDescription = "Pembaruan Tersedia",
+                                tint = Color(0xFFF97316),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = "Versi baru ${release.tagName} tersedia di GitHub",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF9A3412),
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "Update",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFEA580C)
+                            )
+                        }
+                    }
+                }
             }
 
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -4558,7 +4637,7 @@ fun DashboardScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     androidx.compose.foundation.Image(
-                                        painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.logomonber1),
+                                        painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.monber9),
                                         contentDescription = "Logo MonBer",
                                         modifier = Modifier.size(36.dp)
                                     )
@@ -6343,6 +6422,254 @@ fun DashboardScreen(
                 }
             }
         )
+    }
+
+    if (showUpdateDialog) {
+        when (val state = appUpdateState) {
+            is AppUpdateState.UpdateAvailable -> {
+                val release = state.release
+                val currentVer = remember(context) { AppUpdateManager.getCurrentVersionName(context) }
+                AlertDialog(
+                    onDismissRequest = { viewModel.dismissUpdateDialog() },
+                    containerColor = Color.White,
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.SystemUpdate,
+                            contentDescription = "Pembaruan Aplikasi",
+                            tint = Color(0xFF005FAF),
+                            modifier = Modifier.size(32.dp)
+                        )
+                    },
+                    title = {
+                        Text(
+                            text = "Pembaruan Aplikasi Tersedia",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF00386B)
+                        )
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "Versi terbaru ${release.tagName} tersedia di GitHub (versi saat ini: v$currentVer).",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF334155)
+                            )
+                            if (release.apkSizeBytes > 0) {
+                                Text(
+                                    text = String.format("Ukuran APK: %.1f MB", release.apkSizeBytes / (1024f * 1024f)),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF005FAF),
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            if (release.releaseNotes.isNotBlank()) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFFF8FAFC),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 160.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .verticalScroll(rememberScrollState())
+                                            .padding(10.dp)
+                                    ) {
+                                        Text(
+                                            text = release.releaseNotes,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF475569)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        if (!release.apkDownloadUrl.isNullOrBlank()) {
+                            Button(
+                                onClick = { viewModel.downloadAndInstallUpdate(release) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("dialog_update_install_button")
+                            ) {
+                                Text("Update & Instal", fontWeight = FontWeight.Bold)
+                            }
+                        } else if (release.htmlUrl.isNotBlank()) {
+                            Button(
+                                onClick = {
+                                    viewModel.dismissUpdateDialog()
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(release.htmlUrl))
+                                    context.startActivity(intent)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) {
+                                Text("Buka GitHub", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { viewModel.dismissUpdateDialog() },
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) {
+                            Text("Nanti")
+                        }
+                    }
+                )
+            }
+            is AppUpdateState.Downloading -> {
+                AlertDialog(
+                    onDismissRequest = { /* Keep visible or allow minimizing cleanly */ viewModel.dismissUpdateDialog() },
+                    containerColor = Color.White,
+                    title = {
+                        Text(
+                            text = "Mengunduh Pembaruan",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF00386B)
+                        )
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = "Mengunduh ${state.release.tagName} (${state.progressPercent}%)...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF334155)
+                            )
+                            LinearProgressIndicator(
+                                progress = { (state.progressPercent / 100f).coerceIn(0f, 1f) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp)),
+                                color = Color(0xFF005FAF),
+                                trackColor = Color(0xFFDBEAFE)
+                            )
+                            val sizeLabel = if (state.totalMb > 0f) {
+                                String.format("%.1f MB / %.1f MB", state.downloadedMb, state.totalMb)
+                            } else {
+                                String.format("%.1f MB", state.downloadedMb)
+                            }
+                            Text(
+                                text = sizeLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = { viewModel.dismissUpdateDialog() },
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) {
+                            Text("Sembunyikan")
+                        }
+                    }
+                )
+            }
+            is AppUpdateState.NeedsInstallPermission -> {
+                AlertDialog(
+                    onDismissRequest = { viewModel.dismissUpdateDialog() },
+                    containerColor = Color.White,
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.SecurityUpdateWarning,
+                            contentDescription = "Izin Instalasi",
+                            tint = Color(0xFFF97316),
+                            modifier = Modifier.size(32.dp)
+                        )
+                    },
+                    title = {
+                        Text(
+                            text = "Izin Instalasi Diperlukan",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF00386B)
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "Aktifkan izin \"Instal aplikasi tidak dikenal\" untuk memasang pembaruan ${state.release.tagName}.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF334155)
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                updateInstallPermissionLauncher.launch(
+                                    AppUpdateManager.createInstallPermissionIntent(context)
+                                )
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF97316)),
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) {
+                            Text("Buka Pengaturan", fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { viewModel.dismissUpdateDialog() },
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) {
+                            Text("Batal")
+                        }
+                    }
+                )
+            }
+            is AppUpdateState.ReadyToInstall -> {
+                AlertDialog(
+                    onDismissRequest = { viewModel.dismissUpdateDialog() },
+                    containerColor = Color.White,
+                    title = {
+                        Text(
+                            text = "APK Siap Diinstal",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF00386B)
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "File APK versi ${state.release.tagName} berhasil diunduh. Ketuk Instal untuk memasang pembaruan.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF334155)
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (AppUpdateManager.canRequestPackageInstalls(context)) {
+                                    AppUpdateManager.launchApkInstaller(context, state.apkFile)
+                                } else {
+                                    updateInstallPermissionLauncher.launch(
+                                        AppUpdateManager.createInstallPermissionIntent(context)
+                                    )
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) {
+                            Text("Instal Sekarang", fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { viewModel.dismissUpdateDialog() },
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) {
+                            Text("Tutup")
+                        }
+                    }
+                )
+            }
+            else -> Unit
+        }
     }
     }
 }
