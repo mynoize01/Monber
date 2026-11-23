@@ -1,22 +1,28 @@
-name: Build & Release Android APK
+name: Android CI & Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Versi tag rilis (contoh: v1.4.5, harus lebih besar dari versi sebelumnya)'
-        required: true
+        description: 'Tag rilis opsional untuk publish GitHub Release (contoh: v1.4.5)'
+        required: false
+        default: ''
         type: string
 
 permissions:
   contents: write
 
 jobs:
-  release-apk:
-    name: Build APK & Publish Release
+  build-and-release:
+    name: Build, Test & Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -43,11 +49,17 @@ jobs:
           echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
 
-          SDKMANAGER=$(command -v sdkmanager || find "$SDK_DIR" -name "sdkmanager" -type f 2>/dev/null | head -n 1 || true)
+          SDKMANAGER=""
+          if [ -x "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$SDK_DIR/cmdline-tools/latest/bin/sdkmanager"
+          else
+            SDKMANAGER=$(command -v sdkmanager || find "$SDK_DIR" -name "sdkmanager" -type f 2>/dev/null | head -n 1 || true)
+          fi
+
           if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
             echo "Installing Android command-line tools..."
             mkdir -p "$SDK_DIR/cmdline-tools"
-            curl -sSL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o /tmp/cmdline-tools.zip
+            curl -sSL "https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip" -o /tmp/cmdline-tools.zip
             rm -rf /tmp/cmdline-unpack
             unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline-unpack
             rm -rf "$SDK_DIR/cmdline-tools/latest"
@@ -76,7 +88,9 @@ jobs:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag_name }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           GRADLE_CMD="gradle"
           if [ -x "./gradlew" ]; then
@@ -87,6 +101,12 @@ jobs:
           mkdir -p dist
 
           GRADLE_CI_FLAGS="--no-daemon --no-configuration-cache --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g --stacktrace"
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_TAG" ]; then
+            ARTIFACT_LABEL="$INPUT_TAG"
+          else
+            ARTIFACT_LABEL="$REF_NAME"
+          fi
 
           if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
             echo "Building Release APK using configured GitHub Secrets keystore..."
@@ -108,10 +128,25 @@ jobs:
             exit 1
           fi
 
-          cp "$APK_PATH" "dist/MonBer-${TAG_NAME}.apk"
-          echo "Prepared artifact: dist/MonBer-${TAG_NAME}.apk"
+          cp "$APK_PATH" "dist/MonBer-${ARTIFACT_LABEL}.apk"
+          echo "Prepared artifact: dist/MonBer-${ARTIFACT_LABEL}.apk"
+
+      - name: Run Unit Tests
+        run: |
+          GRADLE_CMD="gradle"
+          if [ -x "./gradlew" ]; then
+            GRADLE_CMD="./gradlew"
+          fi
+          $GRADLE_CMD :app:testDebugUnitTest --no-daemon --no-configuration-cache --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: monber-apk
+          path: dist/*.apk
 
       - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag_name || github.ref_name }}
