@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CustomerEntity
 import com.example.data.model.desa
+import com.example.ui.theme.BentoPrimary
 import java.text.NumberFormat
 
 @Composable
@@ -215,7 +216,6 @@ fun GlobalSearchResultCard(
 
     val rekStr = if (customer.noRekening.isNotBlank()) customer.noRekening else customer.cif.ifBlank { "-" }
     val osVal = if (isIntrakomp) customer.osPinjaman else customer.totalTunggakan
-    val osLabel = if (isIntrakomp) "OS" else "Total"
 
     Box(
         modifier = Modifier
@@ -244,17 +244,40 @@ fun GlobalSearchResultCard(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
 
-                // Info No Rek & OS di sebelah kiri badge Kolek
+                // Info No Rek & OS (tanpa awalan Rek:/OS:) dengan background biru & tulisan putih
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
-                    Text(
-                        text = "Rek: $rekStr • $osLabel: Rp ${formatDoubleClean(osVal, formatter)}",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isIntrakomp) Color(0xFF00386B) else Color(0xFF93000A)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(BentoPrimary)
+                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            text = rekStr,
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                            maxLines = 1
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(BentoPrimary)
+                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            text = "Rp ${formatDoubleClean(osVal, formatter)}",
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1
+                        )
+                    }
 
                     // Info Kolek: Badge kolektabilitas
                     if (isIntrakomp) {
