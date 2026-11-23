@@ -13,6 +13,7 @@ import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.content.pm.PackageInfoCompat
 import com.example.BuildConfig
 import com.example.MainActivity
 import com.example.R
@@ -33,7 +34,8 @@ data class GitHubReleaseInfo(
     val htmlUrl: String,
     val apkDownloadUrl: String?,
     val apkFileName: String?,
-    val apkSizeBytes: Long
+    val apkSizeBytes: Long,
+    val versionCode: Int = 0
 )
 
 sealed class AppUpdateState {
@@ -87,39 +89,103 @@ object AppUpdateManager {
         }
     }
 
+    fun getCurrentVersionCode(context: Context): Long {
+        return try {
+            val pInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(
+                    context.packageName,
+                    PackageManager.PackageInfoFlags.of(0)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            }
+            PackageInfoCompat.getLongVersionCode(pInfo)
+        } catch (_: Exception) {
+            BuildConfig.VERSION_CODE.toLong()
+        }
+    }
+
     /**
      * Converts inputs such as:
      * - "owner/repo"
      * - "https://github.com/owner/repo"
-     * - "https://github.com/owner/repo/releases"
-     * - "https://api.github.com/repos/owner/repo/releases/latest"
-     * into a normalized GitHub Releases API endpoint.
+     * - "https://github.com/owner/repo.git"
+     * - "https://github.com/owner/repo/blob/main/version.json" -> raw.githubusercontent.com
+     * - "https://raw.githubusercontent.com/owner/repo/main/version.json"
+     * - "https://example.com/version.json" (any remote JSON host)
+     * into a primary normalized endpoint URL.
      */
     fun normalizeRepoToApiUrl(rawInput: String): String? {
-        val trimmed = rawInput.trim().trimEnd('/')
-        if (trimmed.isBlank()) return null
+        return resolveVersionCheckUrls(rawInput).firstOrNull()
+    }
 
-        if (trimmed.startsWith("https://api.github.com/repos/")) {
-            return if (trimmed.endsWith("/releases/latest")) trimmed else "$trimmed/releases/latest"
+    /**
+     * Resolves an input repository or remote JSON URL into ordered endpoint candidates.
+     * Supports direct remote JSON URLs on GitHub/Gist/any host, plus GitHub Releases API
+     * with automatic fallback to `version.json` on `main` / `master`.
+     */
+    fun resolveVersionCheckUrls(rawInput: String): List<String> {
+        val trimmed = rawInput.trim().trimEnd('/')
+        if (trimmed.isBlank()) return emptyList()
+
+        // 1. GitHub blob/raw file link -> raw.githubusercontent.com
+        val githubFileRegex = Regex(
+            """https?://(?:www\.)?github\.com/([^/\s]+)/([^/\s]+)/(?:blob|raw)/([^/\s]+)/(.+)""",
+            RegexOption.IGNORE_CASE
+        )
+        githubFileRegex.find(trimmed)?.let { m ->
+            val owner = m.groupValues[1]
+            val repo = m.groupValues[2].removeSuffix(".git")
+            val branch = m.groupValues[3]
+            val path = m.groupValues[4]
+            return listOf("https://raw.githubusercontent.com/$owner/$repo/$branch/$path")
         }
 
-        val githubRegex = Regex("""(?:https?://)?(?:www\.)?github\.com/([^/\s]+)/([^/\s]+)(?:/.*)?""", RegexOption.IGNORE_CASE)
-        val match = githubRegex.find(trimmed)
-        if (match != null) {
+        // 2. GitHub Releases API URL directly
+        if (trimmed.startsWith("https://api.github.com/repos/", ignoreCase = true)) {
+            val apiUrl = if (trimmed.endsWith("/releases/latest")) trimmed else "$trimmed/releases/latest"
+            return listOf(apiUrl)
+        }
+
+        // 3. Direct remote JSON URL on GitHub raw, Gist, or any other host
+        val isHttpUrl = trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("https://", ignoreCase = true)
+        val isGitHubRepoHost = Regex("""^https?://(?:www\.)?github\.com/[^/\s]+/[^/\s]+(?:/releases(?:/latest)?)?(?:\.git)?$""", RegexOption.IGNORE_CASE)
+            .matches(trimmed)
+
+        if (isHttpUrl && !isGitHubRepoHost) {
+            return listOf(trimmed)
+        }
+
+        // 4. GitHub repository URL -> Releases API + raw version.json fallbacks
+        val githubRegex = Regex(
+            """(?:https?://)?(?:www\.)?github\.com/([^/\s]+)/([^/\s]+)(?:/.*)?""",
+            RegexOption.IGNORE_CASE
+        )
+        githubRegex.find(trimmed)?.let { match ->
             val owner = match.groupValues[1]
             val repo = match.groupValues[2].removeSuffix(".git")
-            return "https://api.github.com/repos/$owner/$repo/releases/latest"
+            return listOf(
+                "https://api.github.com/repos/$owner/$repo/releases/latest",
+                "https://raw.githubusercontent.com/$owner/$repo/main/version.json",
+                "https://raw.githubusercontent.com/$owner/$repo/master/version.json"
+            )
         }
 
+        // 5. Shorthand "owner/repo"
         val slugRegex = Regex("""^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)$""")
-        val slugMatch = slugRegex.find(trimmed)
-        if (slugMatch != null) {
+        slugRegex.find(trimmed)?.let { slugMatch ->
             val owner = slugMatch.groupValues[1]
             val repo = slugMatch.groupValues[2].removeSuffix(".git")
-            return "https://api.github.com/repos/$owner/$repo/releases/latest"
+            return listOf(
+                "https://api.github.com/repos/$owner/$repo/releases/latest",
+                "https://raw.githubusercontent.com/$owner/$repo/main/version.json",
+                "https://raw.githubusercontent.com/$owner/$repo/master/version.json"
+            )
         }
 
-        return null
+        return emptyList()
     }
 
     fun normalizeVersionNumber(raw: String): String {
@@ -143,66 +209,199 @@ object AppUpdateManager {
         return false
     }
 
+    fun isNewerUpdate(
+        release: GitHubReleaseInfo,
+        currentVersionName: String,
+        currentVersionCode: Long
+    ): Boolean {
+        if (release.versionCode > 0 && currentVersionCode > 0L) {
+            if (release.versionCode.toLong() > currentVersionCode) return true
+            if (release.versionCode.toLong() < currentVersionCode) return false
+        }
+        val remoteVersionCandidate = release.versionName.ifBlank { release.tagName }
+        return isNewerVersion(remoteVersionCandidate, currentVersionName)
+    }
+
+    /**
+     * Parses either a GitHub Releases API JSON response or a generic remote `version.json` file.
+     */
+    fun parseVersionJson(bodyStr: String, sourceUrl: String = ""): GitHubReleaseInfo {
+        val json = JSONObject(bodyStr)
+        val isGitHubReleaseJson = json.has("tag_name") && json.has("assets")
+
+        if (isGitHubReleaseJson) {
+            val tagName = json.optString("tag_name", "").trim()
+            val releaseName = json.optString("name", tagName).ifBlank { tagName }
+            val releaseNotes = json.optString("body", "").trim()
+            val htmlUrl = json.optString("html_url", "")
+            val assets = json.optJSONArray("assets")
+
+            var apkUrl: String? = null
+            var apkName: String? = null
+            var apkSize = 0L
+
+            if (assets != null) {
+                for (i in 0 until assets.length()) {
+                    val asset = assets.optJSONObject(i) ?: continue
+                    val name = asset.optString("name", "")
+                    if (name.endsWith(".apk", ignoreCase = true)) {
+                        apkUrl = asset.optString("browser_download_url", "").ifBlank { null }
+                        apkName = name
+                        apkSize = asset.optLong("size", 0L)
+                        break
+                    }
+                }
+            }
+
+            return GitHubReleaseInfo(
+                tagName = tagName,
+                versionName = normalizeVersionNumber(tagName),
+                releaseName = releaseName,
+                releaseNotes = releaseNotes,
+                htmlUrl = htmlUrl,
+                apkDownloadUrl = apkUrl,
+                apkFileName = apkName,
+                apkSizeBytes = apkSize,
+                versionCode = json.optInt("versionCode", json.optInt("version_code", 0))
+            )
+        }
+
+        // Generic remote version.json manifest (GitHub raw, Gist, or any other host)
+        val rawVersionName = firstNonBlank(
+            json.optString("versionName", ""),
+            json.optString("version_name", ""),
+            json.optString("latestVersion", ""),
+            json.optString("latest_version", ""),
+            json.optString("version", "")
+        )
+        val rawTagName = firstNonBlank(
+            json.optString("tagName", ""),
+            json.optString("tag_name", "")
+        ).ifBlank {
+            if (rawVersionName.isNotBlank()) "v${normalizeVersionNumber(rawVersionName)}" else ""
+        }
+        val normalizedVersion = normalizeVersionNumber(rawVersionName.ifBlank { rawTagName })
+        val remoteVersionCode = when {
+            json.has("versionCode") -> json.optInt("versionCode", 0)
+            json.has("version_code") -> json.optInt("version_code", 0)
+            json.has("latestVersionCode") -> json.optInt("latestVersionCode", 0)
+            json.has("latest_version_code") -> json.optInt("latest_version_code", 0)
+            else -> 0
+        }
+
+        if (normalizedVersion.isBlank() && remoteVersionCode <= 0) {
+            throw IllegalStateException("Format JSON versi tidak valid dari $sourceUrl.")
+        }
+
+        val apkUrl = firstNonBlank(
+            json.optString("apkUrl", ""),
+            json.optString("apk_url", ""),
+            json.optString("apkDownloadUrl", ""),
+            json.optString("downloadUrl", ""),
+            json.optString("download_url", ""),
+            json.optString("url", "")
+        ).ifBlank { null }
+
+        val htmlUrl = firstNonBlank(
+            json.optString("htmlUrl", ""),
+            json.optString("html_url", ""),
+            json.optString("pageUrl", ""),
+            json.optString("page_url", ""),
+            apkUrl ?: ""
+        )
+
+        val releaseName = firstNonBlank(
+            json.optString("releaseName", ""),
+            json.optString("release_name", ""),
+            json.optString("title", ""),
+            json.optString("name", ""),
+            rawTagName
+        )
+
+        val releaseNotes = firstNonBlank(
+            json.optString("releaseNotes", ""),
+            json.optString("release_notes", ""),
+            json.optString("changelog", ""),
+            json.optString("notes", ""),
+            json.optString("body", ""),
+            json.optString("description", "")
+        )
+
+        val apkFileName = firstNonBlank(
+            json.optString("apkFileName", ""),
+            json.optString("apk_file_name", "")
+        ).ifBlank {
+            apkUrl?.substringAfterLast('/')?.substringBefore('?')?.takeIf { it.endsWith(".apk", ignoreCase = true) }
+        }
+
+        val apkSize = when {
+            json.has("apkSizeBytes") -> json.optLong("apkSizeBytes", 0L)
+            json.has("apk_size_bytes") -> json.optLong("apk_size_bytes", 0L)
+            json.has("size") -> json.optLong("size", 0L)
+            else -> 0L
+        }
+
+        return GitHubReleaseInfo(
+            tagName = rawTagName.ifBlank { "v$normalizedVersion" },
+            versionName = normalizedVersion,
+            releaseName = releaseName,
+            releaseNotes = releaseNotes,
+            htmlUrl = htmlUrl,
+            apkDownloadUrl = apkUrl,
+            apkFileName = apkFileName,
+            apkSizeBytes = apkSize,
+            versionCode = remoteVersionCode
+        )
+    }
+
+    private fun firstNonBlank(vararg values: String): String {
+        return values.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+    }
+
     suspend fun fetchLatestRelease(repoInput: String): Result<GitHubReleaseInfo> = withContext(Dispatchers.IO) {
         try {
-            val apiUrl = normalizeRepoToApiUrl(repoInput)
-                ?: return@withContext Result.failure(
-                    IllegalArgumentException("Format repositori GitHub tidak valid. Gunakan format owner/repo atau URL GitHub.")
+            val candidateUrls = resolveVersionCheckUrls(repoInput)
+            if (candidateUrls.isEmpty()) {
+                return@withContext Result.failure(
+                    IllegalArgumentException("Format URL repositori atau file JSON versi tidak valid.")
                 )
+            }
 
-            val request = Request.Builder()
-                .url(apiUrl)
-                .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "MonBer-Android-Updater")
-                .build()
+            var lastErrorMessage: String? = null
+            for (endpointUrl in candidateUrls) {
+                try {
+                    val isGitHubApi = endpointUrl.contains("api.github.com", ignoreCase = true)
+                    val request = Request.Builder()
+                        .url(endpointUrl)
+                        .header(
+                            "Accept",
+                            if (isGitHubApi) "application/vnd.github+json" else "application/json"
+                        )
+                        .header("User-Agent", "MonBer-Android-Updater")
+                        .build()
 
-            client.newCall(request).execute().use { response ->
-                val bodyStr = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    val msg = when (response.code) {
-                        404 -> "Rilis GitHub tidak ditemukan. Pastikan repositori publik dan sudah memiliki Release."
-                        403 -> "Batas akses GitHub API tercapai. Coba beberapa saat lagi."
-                        else -> "Gagal memeriksa pembaruan (HTTP ${response.code})."
-                    }
-                    return@withContext Result.failure(IllegalStateException(msg))
-                }
+                    client.newCall(request).execute().use { response ->
+                        val bodyStr = response.body?.string().orEmpty()
+                        if (response.isSuccessful && bodyStr.isNotBlank()) {
+                            return@withContext Result.success(parseVersionJson(bodyStr, endpointUrl))
+                        }
 
-                val json = JSONObject(bodyStr)
-                val tagName = json.optString("tag_name", "").trim()
-                val releaseName = json.optString("name", tagName).ifBlank { tagName }
-                val releaseNotes = json.optString("body", "").trim()
-                val htmlUrl = json.optString("html_url", "")
-                val assets = json.optJSONArray("assets")
-
-                var apkUrl: String? = null
-                var apkName: String? = null
-                var apkSize = 0L
-
-                if (assets != null) {
-                    for (i in 0 until assets.length()) {
-                        val asset = assets.optJSONObject(i) ?: continue
-                        val name = asset.optString("name", "")
-                        if (name.endsWith(".apk", ignoreCase = true)) {
-                            apkUrl = asset.optString("browser_download_url", "").ifBlank { null }
-                            apkName = name
-                            apkSize = asset.optLong("size", 0L)
-                            break
+                        lastErrorMessage = when (response.code) {
+                            404 -> "Rilis atau file version.json tidak ditemukan (404)."
+                            403 -> "Batas akses server tercapai (HTTP 403). Coba beberapa saat lagi."
+                            else -> "Gagal memeriksa pembaruan (HTTP ${response.code})."
                         }
                     }
+                } catch (e: Exception) {
+                    lastErrorMessage = e.message ?: "Gagal menghubungi server pembaruan."
                 }
-
-                val info = GitHubReleaseInfo(
-                    tagName = tagName,
-                    versionName = normalizeVersionNumber(tagName),
-                    releaseName = releaseName,
-                    releaseNotes = releaseNotes,
-                    htmlUrl = htmlUrl,
-                    apkDownloadUrl = apkUrl,
-                    apkFileName = apkName,
-                    apkSizeBytes = apkSize
-                )
-                Result.success(info)
             }
+
+            Result.failure(
+                IllegalStateException(
+                    lastErrorMessage ?: "Gagal memuat informasi versi terbaru dari server."
+                )
+            )
         } catch (e: Exception) {
             Result.failure(e)
         }

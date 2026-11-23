@@ -3767,7 +3767,8 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             result.onSuccess { release ->
                 val appContext = getApplication<Application>()
                 val currentVersion = AppUpdateManager.getCurrentVersionName(appContext)
-                if (AppUpdateManager.isNewerVersion(release.tagName, currentVersion)) {
+                val currentVersionCode = AppUpdateManager.getCurrentVersionCode(appContext)
+                if (AppUpdateManager.isNewerUpdate(release, currentVersion, currentVersionCode)) {
                     AppUpdateManager.showUpdateNotification(appContext, release)
                     showUpdateDialog.value = true
                     if (autoInstallOnFind && !release.apkDownloadUrl.isNullOrBlank()) {

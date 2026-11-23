@@ -842,7 +842,7 @@ fun DashboardScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                             Text(
-                                text = "Versi baru ${release.tagName} tersedia di GitHub",
+                                text = "Versi baru ${release.tagName} tersedia",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF9A3412),
@@ -6510,7 +6510,7 @@ fun DashboardScreen(
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
-                                text = "Versi terbaru ${release.tagName} tersedia di GitHub (versi saat ini: v$currentVer).",
+                                text = "Versi terbaru ${release.tagName} tersedia (versi saat ini: v$currentVer).",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(0xFF334155)
                             )
@@ -6565,9 +6565,11 @@ fun DashboardScreen(
                                     context.startActivity(intent)
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
-                                modifier = Modifier.heightIn(min = 48.dp)
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("dialog_update_open_link_button")
                             ) {
-                                Text("Buka GitHub", fontWeight = FontWeight.Bold)
+                                Text("Buka Tautan", fontWeight = FontWeight.Bold)
                             }
                         }
                     },
