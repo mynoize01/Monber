@@ -128,7 +128,11 @@ Tgl {tanggal}
 
 class CustomerViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getDatabase(application)
-    private val repository = CustomerRepository(database.customerDao())
+    private val repository = CustomerRepository(
+        database.customerDao(),
+        database.di319Dao(),
+        database.syncMetadataDao()
+    )
 
     private val sharedPrefs = application.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
     val customSpreadsheetUrl = MutableStateFlow(sharedPrefs.getString("custom_spreadsheet_url", "") ?: "")
@@ -260,6 +264,11 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     val bulanLaluCustomers = MutableStateFlow<List<com.example.data.model.CustomerEntity>>(emptyList())
     val akhirBulanCustomers = MutableStateFlow<List<com.example.data.model.CustomerEntity>>(emptyList())
     val dailyCustomers = MutableStateFlow<List<com.example.data.model.CustomerEntity>>(emptyList())
+
+    val lastSyncMetadata: StateFlow<com.example.data.model.SyncMetadataEntity?> =
+        repository.observeLastSyncMetadata()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    val isShowingCachedOfflineData = MutableStateFlow(false)
     
     // Dashboard Period and Summaries (Decoupled from Monitoring and Kelolaan)
     val dashboardPeriodSource = MutableStateFlow("DAILY")
@@ -444,6 +453,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                         val map = if (!url.isNullOrBlank() || !content.isNullOrBlank()) repository.getDailyInfo(url, content) else emptyMap()
                         val unique = getDistinctCustomers(map)
                         if (unique.isNotEmpty()) {
+                            repository.savePeriodCustomers("PERIOD_BULAN_LALU", unique)
                             bulanLaluCustomers.value = unique
                             summaryBulanLalu.value = UnitSummaryData(
                                 os = unique.sumOf { it.osPinjaman },
@@ -452,38 +462,48 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                             kolekSummaryBulanLalu.value = calculateKolekSummary(unique)
                             mantriSummaryBulanLalu.value = calculateMantriSummaries(unique)
                         } else {
-                            val current = repository.getCustomersFlow("INTRAKOMP").first().ifEmpty {
-                                customersList.value.filter { it.menuType == "INTRAKOMP" }.ifEmpty { customersList.value }
-                            }
-                            if (current.isNotEmpty()) {
-                                val blnLaluCustomers = current.map { cust ->
+                            val cachedPeriod = repository.getCachedPeriodCustomers("PERIOD_BULAN_LALU")
+                            val fallbackList = if (cachedPeriod.isNotEmpty()) {
+                                cachedPeriod
+                            } else {
+                                val current = repository.getCustomersFlow("INTRAKOMP").first().ifEmpty {
+                                    customersList.value.filter { it.menuType == "INTRAKOMP" }.ifEmpty { customersList.value }
+                                }
+                                current.map { cust ->
                                     val bLalu = cust.kolekBlnLalu.ifBlank { cust.kolek }
                                     cust.copy(kolek = bLalu)
                                 }
-                                bulanLaluCustomers.value = blnLaluCustomers
+                            }
+                            if (fallbackList.isNotEmpty()) {
+                                bulanLaluCustomers.value = fallbackList
                                 summaryBulanLalu.value = UnitSummaryData(
-                                    os = blnLaluCustomers.sumOf { it.osPinjaman },
-                                    debtors = blnLaluCustomers.size
+                                    os = fallbackList.sumOf { it.osPinjaman },
+                                    debtors = fallbackList.size
                                 )
-                                kolekSummaryBulanLalu.value = calculateKolekSummary(blnLaluCustomers)
-                                mantriSummaryBulanLalu.value = calculateMantriSummaries(blnLaluCustomers)
+                                kolekSummaryBulanLalu.value = calculateKolekSummary(fallbackList)
+                                mantriSummaryBulanLalu.value = calculateMantriSummaries(fallbackList)
                             }
                         }
                     } catch (e: Exception) {
                         android.util.Log.e("CustomerViewModel", "Failed to load bln lalu summary", e)
-                        val current = customersList.value.filter { it.menuType == "INTRAKOMP" }.ifEmpty { customersList.value }
-                        if (current.isNotEmpty()) {
-                            val blnLaluCustomers = current.map { cust ->
+                        val cachedPeriod = repository.getCachedPeriodCustomers("PERIOD_BULAN_LALU")
+                        val fallbackList = if (cachedPeriod.isNotEmpty()) {
+                            cachedPeriod
+                        } else {
+                            val current = customersList.value.filter { it.menuType == "INTRAKOMP" }.ifEmpty { customersList.value }
+                            current.map { cust ->
                                 val bLalu = cust.kolekBlnLalu.ifBlank { cust.kolek }
                                 cust.copy(kolek = bLalu)
                             }
-                            bulanLaluCustomers.value = blnLaluCustomers
+                        }
+                        if (fallbackList.isNotEmpty()) {
+                            bulanLaluCustomers.value = fallbackList
                             summaryBulanLalu.value = UnitSummaryData(
-                                os = blnLaluCustomers.sumOf { it.osPinjaman },
-                                debtors = blnLaluCustomers.size
+                                os = fallbackList.sumOf { it.osPinjaman },
+                                debtors = fallbackList.size
                             )
-                            kolekSummaryBulanLalu.value = calculateKolekSummary(blnLaluCustomers)
-                            mantriSummaryBulanLalu.value = calculateMantriSummaries(blnLaluCustomers)
+                            kolekSummaryBulanLalu.value = calculateKolekSummary(fallbackList)
+                            mantriSummaryBulanLalu.value = calculateMantriSummaries(fallbackList)
                         }
                     }
                 }
@@ -497,6 +517,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                         val map = if (!url.isNullOrBlank() || !content.isNullOrBlank()) repository.getDailyInfo(url, content) else emptyMap()
                         val unique = getDistinctCustomers(map)
                         if (unique.isNotEmpty()) {
+                            repository.savePeriodCustomers("PERIOD_AKHIR_BULAN", unique)
                             akhirBulanCustomers.value = unique
                             summaryAkhirBulan.value = UnitSummaryData(
                                 os = unique.sumOf { it.osPinjaman },
@@ -505,8 +526,13 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                             kolekSummaryAkhirBulan.value = calculateKolekSummary(unique)
                             mantriSummaryAkhirBulan.value = calculateMantriSummaries(unique)
                         } else {
-                            val current = repository.getCustomersFlow("INTRAKOMP").first().ifEmpty {
-                                customersList.value.filter { it.menuType == "INTRAKOMP" }.ifEmpty { customersList.value }
+                            val cachedPeriod = repository.getCachedPeriodCustomers("PERIOD_AKHIR_BULAN")
+                            val current = if (cachedPeriod.isNotEmpty()) {
+                                cachedPeriod
+                            } else {
+                                repository.getCustomersFlow("INTRAKOMP").first().ifEmpty {
+                                    customersList.value.filter { it.menuType == "INTRAKOMP" }.ifEmpty { customersList.value }
+                                }
                             }
                             if (current.isNotEmpty()) {
                                 akhirBulanCustomers.value = current
@@ -520,6 +546,16 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                         }
                     } catch (e: Exception) {
                         android.util.Log.e("CustomerViewModel", "Failed to load akhir bln summary", e)
+                        val cachedPeriod = repository.getCachedPeriodCustomers("PERIOD_AKHIR_BULAN")
+                        if (cachedPeriod.isNotEmpty()) {
+                            akhirBulanCustomers.value = cachedPeriod
+                            summaryAkhirBulan.value = UnitSummaryData(
+                                os = cachedPeriod.sumOf { it.osPinjaman },
+                                debtors = cachedPeriod.size
+                            )
+                            kolekSummaryAkhirBulan.value = calculateKolekSummary(cachedPeriod)
+                            mantriSummaryAkhirBulan.value = calculateMantriSummaries(cachedPeriod)
+                        }
                     }
                 }
                 source == "DAILY" -> {
@@ -531,11 +567,10 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                         val url = if (!isOffline) url3.value else null
                         if (!url.isNullOrBlank() || !content.isNullOrBlank()) {
                             val map = repository.getDailyInfo(url, content)
-                            if (map.isNotEmpty()) {
-                                dailyDataMap.value = map
-                            }
                             val unique = getDistinctCustomers(map)
-                            if (unique.isNotEmpty()) {
+                            if (map.isNotEmpty() && unique.isNotEmpty()) {
+                                dailyDataMap.value = map
+                                repository.savePeriodCustomers("PERIOD_DAILY", unique)
                                 dailyCustomers.value = unique
                                 summaryDaily.value = UnitSummaryData(
                                     os = unique.sumOf { it.osPinjaman },
@@ -543,10 +578,37 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                                 )
                                 kolekSummaryDaily.value = calculateKolekSummary(unique)
                                 mantriSummaryDaily.value = calculateMantriSummaries(unique)
+                            } else if (dailyCustomers.value.isEmpty()) {
+                                val cachedDaily = repository.getCachedPeriodCustomers("PERIOD_DAILY")
+                                if (cachedDaily.isNotEmpty()) {
+                                    dailyCustomers.value = cachedDaily
+                                    if (dailyDataMap.value.isEmpty()) {
+                                        dailyDataMap.value = buildLookupMapFromEntities(cachedDaily)
+                                    }
+                                    summaryDaily.value = UnitSummaryData(
+                                        os = cachedDaily.sumOf { it.osPinjaman },
+                                        debtors = cachedDaily.size
+                                    )
+                                    kolekSummaryDaily.value = calculateKolekSummary(cachedDaily)
+                                    mantriSummaryDaily.value = calculateMantriSummaries(cachedDaily)
+                                }
                             }
                         }
                     } catch (e: Exception) {
                         android.util.Log.e("CustomerViewModel", "Failed to load daily summary", e)
+                        val cachedDaily = repository.getCachedPeriodCustomers("PERIOD_DAILY")
+                        if (cachedDaily.isNotEmpty() && dailyCustomers.value.isEmpty()) {
+                            dailyCustomers.value = cachedDaily
+                            if (dailyDataMap.value.isEmpty()) {
+                                dailyDataMap.value = buildLookupMapFromEntities(cachedDaily)
+                            }
+                            summaryDaily.value = UnitSummaryData(
+                                os = cachedDaily.sumOf { it.osPinjaman },
+                                debtors = cachedDaily.size
+                            )
+                            kolekSummaryDaily.value = calculateKolekSummary(cachedDaily)
+                            mantriSummaryDaily.value = calculateMantriSummaries(cachedDaily)
+                        }
                     }
                 }
             }
@@ -558,6 +620,10 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         if (dashboardMonthlySummary.value.containsKey(m)) return
         viewModelScope.launch(Dispatchers.IO) {
             val isOffline = isOfflineModeEnabled.value
+            if (!isOffline && !repository.isNetworkAvailable(getApplication())) {
+                isShowingCachedOfflineData.value = true
+                return@launch
+            }
             val url = lw321AllUrls[m]?.value ?: ""
             val offlineContent = if (isOffline) {
                 getOfflineFileContent("lw321_all_$m") ?: getOfflineFileContent("url_2")
@@ -623,6 +689,112 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             }
         } catch (e: Exception) {
             android.util.Log.e("CustomerViewModel", "Error loading local cached summaries", e)
+        }
+
+        // Hydrate Room-backed datasets immediately on background IO thread so offline startup is seamless
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val cachedDi319 = repository.getCachedDi319RowsOnce()
+                if (cachedDi319.isNotEmpty() && di319Rows.value.isEmpty()) {
+                    di319Rows.value = cachedDi319
+                }
+
+                val cachedDaily = repository.getCachedPeriodCustomers("PERIOD_DAILY")
+                if (cachedDaily.isNotEmpty()) {
+                    if (dailyCustomers.value.isEmpty()) {
+                        dailyCustomers.value = cachedDaily
+                    }
+                    if (dailyDataMap.value.isEmpty()) {
+                        dailyDataMap.value = buildLookupMapFromEntities(cachedDaily)
+                    }
+                    if (summaryDaily.value.debtors == 0) {
+                        summaryDaily.value = UnitSummaryData(
+                            os = cachedDaily.sumOf { it.osPinjaman },
+                            debtors = cachedDaily.size
+                        )
+                        kolekSummaryDaily.value = calculateKolekSummary(cachedDaily)
+                        mantriSummaryDaily.value = calculateMantriSummaries(cachedDaily)
+                    }
+                }
+
+                val cachedBlnLalu = repository.getCachedPeriodCustomers("PERIOD_BULAN_LALU")
+                if (cachedBlnLalu.isNotEmpty()) {
+                    if (bulanLaluCustomers.value.isEmpty()) {
+                        bulanLaluCustomers.value = cachedBlnLalu
+                    }
+                    if (summaryBulanLalu.value.debtors == 0) {
+                        summaryBulanLalu.value = UnitSummaryData(
+                            os = cachedBlnLalu.sumOf { it.osPinjaman },
+                            debtors = cachedBlnLalu.size
+                        )
+                        kolekSummaryBulanLalu.value = calculateKolekSummary(cachedBlnLalu)
+                        mantriSummaryBulanLalu.value = calculateMantriSummaries(cachedBlnLalu)
+                    }
+                }
+
+                val cachedAkhirBln = repository.getCachedPeriodCustomers("PERIOD_AKHIR_BULAN")
+                if (cachedAkhirBln.isNotEmpty()) {
+                    if (akhirBulanCustomers.value.isEmpty()) {
+                        akhirBulanCustomers.value = cachedAkhirBln
+                    }
+                    if (summaryAkhirBulan.value.debtors == 0) {
+                        summaryAkhirBulan.value = UnitSummaryData(
+                            os = cachedAkhirBln.sumOf { it.osPinjaman },
+                            debtors = cachedAkhirBln.size
+                        )
+                        kolekSummaryAkhirBulan.value = calculateKolekSummary(cachedAkhirBln)
+                        mantriSummaryAkhirBulan.value = calculateMantriSummaries(cachedAkhirBln)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("CustomerViewModel", "Error loading Room cached datasets", e)
+            }
+        }
+    }
+
+    private fun buildLookupMapFromEntities(
+        list: List<com.example.data.model.CustomerEntity>
+    ): Map<String, com.example.data.model.CustomerEntity> {
+        val resultMap = mutableMapOf<String, com.example.data.model.CustomerEntity>()
+        list.forEach { item ->
+            val rek = item.noRekening.trim()
+            if (rek.isNotBlank()) {
+                resultMap[rek] = item
+                val formatted15 = SpreadsheetService.formatRekening15(rek)
+                resultMap[formatted15] = item
+                val cleanRek = rek.filter { it.isDigit() }
+                if (cleanRek.isNotBlank()) {
+                    resultMap[cleanRek] = item
+                    val noZeroRek = cleanRek.trimStart('0')
+                    if (noZeroRek.isNotBlank()) {
+                        resultMap[noZeroRek] = item
+                    }
+                    if (cleanRek.length >= 15) {
+                        resultMap[cleanRek.takeLast(15)] = item
+                    }
+                }
+            }
+            val cif = item.cif.trim()
+            if (cif.isNotBlank()) {
+                resultMap[cif] = item
+                resultMap["CIF-$cif"] = item
+                val cleanCif = cif.filter { it.isLetterOrDigit() }.dropWhile { it == '0' }
+                if (cleanCif.isNotBlank()) {
+                    resultMap[cleanCif] = item
+                    resultMap["CIF-$cleanCif"] = item
+                }
+            }
+        }
+        return resultMap
+    }
+
+    private fun formatSyncTimestamp(millis: Long): String {
+        if (millis <= 0L) return ""
+        return try {
+            val sdf = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale("id", "ID"))
+            sdf.format(java.util.Date(millis))
+        } catch (_: Exception) {
+            ""
         }
     }
 
@@ -1562,19 +1734,33 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         loadTindakLanjutMap()
         loadLocalCachedData()
         loadDailyDataForFilter()
-        viewModelScope.launch(Dispatchers.IO) {
-            // Check if Room database is empty; only seed or refresh if empty to keep startup instantaneous
-            val totalCustomers = repository.getTotalCustomersCount()
-            if (totalCustomers == 0) {
-                repository.seedMockIfEmpty("INTRAKOMP")
-                repository.seedMockIfEmpty("EKSTRAKOMP")
-                val curMenu = selectedMenu.value
-                val fetchMenu = if (curMenu == "KELOLAAN" || curMenu == "KUNJUNGAN") "INTRAKOMP" else curMenu
-                if (fetchMenu != "SIMPANAN") {
-                    refreshSpreadsheetData()
+        viewModelScope.launch {
+            repository.getDi319Flow().collect { cachedRows ->
+                if (cachedRows.isNotEmpty()) {
+                    di319Rows.value = cachedRows
                 }
             }
-            if (periodDateDaily.value.isBlank() && periodDateAkhirBulan.value.isBlank()) {
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val totalCustomers = repository.getTotalCustomersCount()
+            val networkOk = repository.isNetworkAvailable(getApplication())
+            if (totalCustomers == 0) {
+                if (networkOk) {
+                    val curMenu = selectedMenu.value
+                    val fetchMenu = if (curMenu == "KELOLAAN" || curMenu == "KUNJUNGAN") "INTRAKOMP" else curMenu
+                    if (fetchMenu != "SIMPANAN") {
+                        refreshSpreadsheetData()
+                    }
+                } else {
+                    repository.seedMockIfEmpty("INTRAKOMP")
+                    repository.seedMockIfEmpty("EKSTRAKOMP")
+                    isShowingCachedOfflineData.value = true
+                    errorMessage.value = "Tidak ada koneksi internet dan belum ada data tersimpan."
+                }
+            } else if (!networkOk && !isOfflineModeEnabled.value) {
+                isShowingCachedOfflineData.value = true
+            }
+            if (networkOk && periodDateDaily.value.isBlank() && periodDateAkhirBulan.value.isBlank()) {
                 fetchPeriodDates()
             }
         }
@@ -2762,13 +2948,24 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 if (dailyDataMap.value.isEmpty()) {
-                    val isOffline = sharedPrefs.getBoolean("offline_mode", false)
-                    val content = if (isOffline) getOfflineFileContent("url_3") else null
-                    val url = if (!isOffline) url3.value else null
-                    if (!url.isNullOrBlank() || !content.isNullOrBlank()) {
-                        val map = repository.getDailyInfo(url, content)
-                        if (map.isNotEmpty()) {
-                            dailyDataMap.value = map
+                    val cachedDaily = repository.getCachedPeriodCustomers("PERIOD_DAILY")
+                    if (cachedDaily.isNotEmpty()) {
+                        dailyCustomers.value = cachedDaily
+                        dailyDataMap.value = buildLookupMapFromEntities(cachedDaily)
+                    }
+                }
+                val isOffline = isOfflineModeEnabled.value
+                val content = if (isOffline) getOfflineFileContent("url_3") else null
+                val url = if (!isOffline) url3.value else null
+                val canFetch = !content.isNullOrBlank() || (!url.isNullOrBlank() && repository.isNetworkAvailable(getApplication()))
+                if (canFetch) {
+                    val map = repository.getDailyInfo(url, content)
+                    if (map.isNotEmpty()) {
+                        dailyDataMap.value = map
+                        val unique = getDistinctCustomers(map)
+                        if (unique.isNotEmpty()) {
+                            dailyCustomers.value = unique
+                            repository.savePeriodCustomers("PERIOD_DAILY", unique)
                         }
                     }
                 }
@@ -2845,16 +3042,37 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
 
     fun checkAndRefreshIfEmpty(menu: String) {
         viewModelScope.launch(Dispatchers.IO) {
+            val isOffline = isOfflineModeEnabled.value
+            val hasNetwork = repository.isNetworkAvailable(getApplication())
             val actualMenu = if (menu == "KELOLAAN" || menu == "KUNJUNGAN") "INTRAKOMP" else menu
             if (actualMenu == "SIMPANAN") {
                 if (di319Rows.value.isEmpty()) {
-                    refreshSpreadsheetData()
+                    val cached = repository.getCachedDi319RowsOnce()
+                    if (cached.isNotEmpty()) {
+                        di319Rows.value = cached
+                        if (!isOffline && !hasNetwork) {
+                            isShowingCachedOfflineData.value = true
+                        }
+                    } else if (isOffline || hasNetwork) {
+                        refreshSpreadsheetData()
+                    } else {
+                        isShowingCachedOfflineData.value = true
+                        errorMessage.value = "Koneksi internet terputus dan belum ada cache Simpanan DI319."
+                    }
+                } else if (!isOffline && !hasNetwork) {
+                    isShowingCachedOfflineData.value = true
                 }
                 return@launch
             }
             val count = repository.getCustomersCount(actualMenu)
             if (count == 0) {
-                refreshSpreadsheetData()
+                if (isOffline || hasNetwork) {
+                    refreshSpreadsheetData()
+                } else {
+                    isShowingCachedOfflineData.value = true
+                }
+            } else if (!isOffline && !hasNetwork) {
+                isShowingCachedOfflineData.value = true
             }
         }
     }
@@ -2878,6 +3096,28 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             val activeMenu = selectedMenu.value
             val isOffline = isOfflineModeEnabled.value
 
+            if (!isOffline && !repository.isNetworkAvailable(getApplication())) {
+                val cachedDi319 = repository.getCachedDi319RowsOnce()
+                if (cachedDi319.isNotEmpty() && di319Rows.value.isEmpty()) {
+                    di319Rows.value = cachedDi319
+                }
+                val cachedDaily = repository.getCachedPeriodCustomers("PERIOD_DAILY")
+                if (cachedDaily.isNotEmpty() && dailyDataMap.value.isEmpty()) {
+                    dailyCustomers.value = cachedDaily
+                    dailyDataMap.value = buildLookupMapFromEntities(cachedDaily)
+                }
+                val lastMeta = repository.getLastSyncMetadata()
+                val timeSuffix = lastMeta?.let { formatSyncTimestamp(it.lastSyncedAt) }?.takeIf { it.isNotBlank() }
+                isShowingCachedOfflineData.value = true
+                errorMessage.value = if (timeSuffix != null) {
+                    "Koneksi internet terputus. Menampilkan data cache Room terakhir ($timeSuffix)."
+                } else {
+                    "Koneksi internet terputus. Menampilkan data cache Room terakhir yang tersimpan."
+                }
+                isRefreshing.value = false
+                return@launch
+            }
+
             if (activeMenu == "SIMPANAN") {
                 try {
                     val di319List: List<com.example.data.model.Di319Row> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -2897,10 +3137,34 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                             }
                         }
                     }
-                    di319Rows.value = di319List
+                    if (di319List.isNotEmpty()) {
+                        di319Rows.value = di319List
+                        repository.saveDi319Rows(di319List)
+                        isShowingCachedOfflineData.value = false
+                    } else {
+                        val cachedDi319 = repository.getCachedDi319RowsOnce()
+                        if (cachedDi319.isNotEmpty()) {
+                            di319Rows.value = cachedDi319
+                            isShowingCachedOfflineData.value = true
+                            val lastMeta = repository.getLastSyncMetadata()
+                            val timeStr = lastMeta?.let { formatSyncTimestamp(it.lastSyncedAt) }?.takeIf { it.isNotBlank() }
+                            errorMessage.value = if (timeStr != null) {
+                                "Gagal menyegarkan Simpanan DI319. Menampilkan cache Room terakhir ($timeStr)."
+                            } else {
+                                "Gagal menyegarkan Simpanan DI319. Menampilkan cache Room terakhir."
+                            }
+                        }
+                    }
                 } catch (e: Exception) {
                     android.util.Log.e("CustomerViewModel", "Failed to directly load di319 mapping", e)
-                    errorMessage.value = "Gagal memuat data Simpanan DI319: ${e.message}"
+                    val cachedDi319 = repository.getCachedDi319RowsOnce()
+                    if (cachedDi319.isNotEmpty()) {
+                        di319Rows.value = cachedDi319
+                        isShowingCachedOfflineData.value = true
+                        errorMessage.value = "Koneksi bermasalah — menampilkan data Simpanan DI319 dari cache Room."
+                    } else {
+                        errorMessage.value = "Gagal memuat data Simpanan DI319: ${e.message}"
+                    }
                 }
                 isRefreshing.value = false
                 return@launch
@@ -3042,7 +3306,9 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                         emptyMap()
                     }
                 }
-                dailyDataMap.value = dMap
+                if (dMap.isNotEmpty()) {
+                    dailyDataMap.value = dMap
+                }
                 fetchPeriodDates()
                 
                 try {
@@ -3055,6 +3321,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                     }
                     val uniqueBlnLalu = getDistinctCustomers(blnLaluMap)
                     if (uniqueBlnLalu.isNotEmpty()) {
+                        repository.savePeriodCustomers("PERIOD_BULAN_LALU", uniqueBlnLalu)
                         bulanLaluCustomers.value = uniqueBlnLalu
                         summaryBulanLalu.value = UnitSummaryData(
                             os = uniqueBlnLalu.sumOf { it.osPinjaman },
@@ -3062,20 +3329,25 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                         )
                         kolekSummaryBulanLalu.value = calculateKolekSummary(uniqueBlnLalu)
                         mantriSummaryBulanLalu.value = calculateMantriSummaries(uniqueBlnLalu)
-                    } else {
-                        val current = customersList.value.filter { it.menuType == "INTRAKOMP" }.ifEmpty { customersList.value }
-                        if (current.isNotEmpty()) {
-                            val blnLaluCustomersList = current.map { cust ->
+                    } else if (bulanLaluCustomers.value.isEmpty()) {
+                        val cachedBlnLalu = repository.getCachedPeriodCustomers("PERIOD_BULAN_LALU")
+                        val fallbackList = if (cachedBlnLalu.isNotEmpty()) {
+                            cachedBlnLalu
+                        } else {
+                            val current = customersList.value.filter { it.menuType == "INTRAKOMP" }.ifEmpty { customersList.value }
+                            current.map { cust ->
                                 val bLalu = cust.kolekBlnLalu.ifBlank { cust.kolek }
                                 cust.copy(kolek = bLalu)
                             }
-                            bulanLaluCustomers.value = blnLaluCustomersList
+                        }
+                        if (fallbackList.isNotEmpty()) {
+                            bulanLaluCustomers.value = fallbackList
                             summaryBulanLalu.value = UnitSummaryData(
-                                os = blnLaluCustomersList.sumOf { it.osPinjaman },
-                                debtors = blnLaluCustomersList.size
+                                os = fallbackList.sumOf { it.osPinjaman },
+                                debtors = fallbackList.size
                             )
-                            kolekSummaryBulanLalu.value = calculateKolekSummary(blnLaluCustomersList)
-                            mantriSummaryBulanLalu.value = calculateMantriSummaries(blnLaluCustomersList)
+                            kolekSummaryBulanLalu.value = calculateKolekSummary(fallbackList)
+                            mantriSummaryBulanLalu.value = calculateMantriSummaries(fallbackList)
                         }
                     }
                 } catch (e: Exception) {
@@ -3092,6 +3364,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                     }
                     val uniqueAkhirBln = getDistinctCustomers(akhirBlnMap)
                     if (uniqueAkhirBln.isNotEmpty()) {
+                        repository.savePeriodCustomers("PERIOD_AKHIR_BULAN", uniqueAkhirBln)
                         akhirBulanCustomers.value = uniqueAkhirBln
                         summaryAkhirBulan.value = UnitSummaryData(
                             os = uniqueAkhirBln.sumOf { it.osPinjaman },
@@ -3099,8 +3372,13 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                         )
                         kolekSummaryAkhirBulan.value = calculateKolekSummary(uniqueAkhirBln)
                         mantriSummaryAkhirBulan.value = calculateMantriSummaries(uniqueAkhirBln)
-                    } else {
-                        val current = customersList.value.filter { it.menuType == "INTRAKOMP" }.ifEmpty { customersList.value }
+                    } else if (akhirBulanCustomers.value.isEmpty()) {
+                        val cachedAkhirBln = repository.getCachedPeriodCustomers("PERIOD_AKHIR_BULAN")
+                        val current = if (cachedAkhirBln.isNotEmpty()) {
+                            cachedAkhirBln
+                        } else {
+                            customersList.value.filter { it.menuType == "INTRAKOMP" }.ifEmpty { customersList.value }
+                        }
                         if (current.isNotEmpty()) {
                             akhirBulanCustomers.value = current
                             summaryAkhirBulan.value = UnitSummaryData(
@@ -3118,14 +3396,29 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 try {
                     val uniqueDaily = getDistinctCustomers(dMap)
                     if (uniqueDaily.isNotEmpty()) {
+                        repository.savePeriodCustomers("PERIOD_DAILY", uniqueDaily)
                         dailyCustomers.value = uniqueDaily
+                        summaryDaily.value = UnitSummaryData(
+                            os = uniqueDaily.sumOf { it.osPinjaman },
+                            debtors = uniqueDaily.size
+                        )
+                        kolekSummaryDaily.value = calculateKolekSummary(uniqueDaily)
+                        mantriSummaryDaily.value = calculateMantriSummaries(uniqueDaily)
+                    } else if (dailyCustomers.value.isEmpty()) {
+                        val cachedDaily = repository.getCachedPeriodCustomers("PERIOD_DAILY")
+                        if (cachedDaily.isNotEmpty()) {
+                            dailyCustomers.value = cachedDaily
+                            if (dailyDataMap.value.isEmpty()) {
+                                dailyDataMap.value = buildLookupMapFromEntities(cachedDaily)
+                            }
+                            summaryDaily.value = UnitSummaryData(
+                                os = cachedDaily.sumOf { it.osPinjaman },
+                                debtors = cachedDaily.size
+                            )
+                            kolekSummaryDaily.value = calculateKolekSummary(cachedDaily)
+                            mantriSummaryDaily.value = calculateMantriSummaries(cachedDaily)
+                        }
                     }
-                    summaryDaily.value = UnitSummaryData(
-                        os = uniqueDaily.sumOf { it.osPinjaman },
-                        debtors = uniqueDaily.size
-                    )
-                    kolekSummaryDaily.value = calculateKolekSummary(uniqueDaily)
-                    mantriSummaryDaily.value = calculateMantriSummaries(uniqueDaily)
                 } catch (e: Exception) {
                     android.util.Log.e("CustomerViewModel", "Failed to load daily summary", e)
                 }
@@ -3151,17 +3444,34 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                         }
                     }
                 }
-                di319Rows.value = di319List
+                if (di319List.isNotEmpty()) {
+                    di319Rows.value = di319List
+                    repository.saveDi319Rows(di319List)
+                } else if (di319Rows.value.isEmpty()) {
+                    val cachedDi319 = repository.getCachedDi319RowsOnce()
+                    if (cachedDi319.isNotEmpty()) {
+                        di319Rows.value = cachedDi319
+                    }
+                }
             } catch (e: Exception) {
                 android.util.Log.e("CustomerViewModel", "Failed to load di319 mapping", e)
             }
-            
+
+            persistCurrentSummaries()
+
             if (result.isFailure) {
+                isShowingCachedOfflineData.value = true
+                val lastMeta = repository.getLastSyncMetadata()
+                val timeStr = lastMeta?.let { formatSyncTimestamp(it.lastSyncedAt) }?.takeIf { it.isNotBlank() }
                 errorMessage.value = if (isOffline) {
                     "Gagal memuat data offline: " + (result.exceptionOrNull()?.message ?: "Format CSV salah")
+                } else if (timeStr != null) {
+                    "Koneksi terputus — menampilkan data cache Room terakhir ($timeStr)."
                 } else {
-                    "Menampilkan data lokal offline: " + (result.exceptionOrNull()?.message ?: "Koneksi Bermasalah")
+                    "Koneksi terputus — menampilkan data cache Room terakhir."
                 }
+            } else {
+                isShowingCachedOfflineData.value = false
             }
             isRefreshing.value = false
         }

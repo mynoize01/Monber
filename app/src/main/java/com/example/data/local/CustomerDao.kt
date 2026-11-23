@@ -13,6 +13,9 @@ interface CustomerDao {
     @Query("SELECT * FROM customers WHERE menuType = :menuType")
     fun getCustomersByMenu(menuType: String): Flow<List<CustomerEntity>>
 
+    @Query("SELECT * FROM customers WHERE menuType = :menuType")
+    suspend fun getCustomersByMenuOnce(menuType: String): List<CustomerEntity>
+
     @Query("SELECT * FROM customers WHERE menuType IN ('INTRAKOMP', 'EKSTRAKOMP')")
     fun getAllIntraAndEkstraCustomers(): Flow<List<CustomerEntity>>
 

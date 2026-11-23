@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,6 +74,7 @@ import com.example.R
 import com.example.ui.components.CurvedAnimatedBottomBar
 import com.example.ui.components.HeaderPocketSearchBar
 import com.example.ui.components.HeaderPocketSearchButton
+import com.example.ui.components.PnLoginPopupDialog
 import com.example.ui.components.TableLiquidSearchBar
 import com.example.data.model.CustomerEntity
 import com.example.data.model.desa
@@ -533,6 +535,8 @@ fun DashboardScreen(
     val summaryStats by viewModel.summaryStats.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    val isShowingCachedOfflineData by viewModel.isShowingCachedOfflineData.collectAsStateWithLifecycle()
+    val lastSyncMetadata by viewModel.lastSyncMetadata.collectAsStateWithLifecycle()
     val sortCol by viewModel.sortColumn.collectAsState()
     val sortDir by viewModel.sortDirection.collectAsState()
     val loggedInPN by viewModel.loggedInPN.collectAsState()
@@ -857,6 +861,67 @@ fun DashboardScreen(
                 }
             }
 
+            // Room Offline Cache Indicator Banner (shown across Dashboard & Data views when offline)
+            androidx.compose.animation.AnimatedVisibility(
+                visible = isShowingCachedOfflineData && errorMessage == null
+            ) {
+                val syncTimeLabel = remember(lastSyncMetadata) {
+                    val ts = lastSyncMetadata?.lastSyncedAt ?: 0L
+                    if (ts > 0L) {
+                        java.text.SimpleDateFormat("dd MMM HH:mm", Locale("id", "ID"))
+                            .format(java.util.Date(ts))
+                    } else null
+                }
+                Surface(
+                    color = Color(0xFFEFF6FF),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("offline_cache_banner")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudOff,
+                            contentDescription = "Mode Cache Offline",
+                            tint = Color(0xFF1D4ED8),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = if (syncTimeLabel != null) {
+                                "Offline • Cache Room ($syncTimeLabel)"
+                            } else {
+                                "Offline • Menampilkan data cache Room terakhir"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFF1E3A8A),
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        TextButton(
+                            onClick = { viewModel.refreshSpreadsheetData(force = true) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 48.dp)
+                                .testTag("retry_sync_button")
+                        ) {
+                            Text(
+                                text = "Sinkronkan",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1D4ED8)
+                            )
+                        }
+                    }
+                }
+            }
+
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 val activeSection = when (selectedBottomNav) {
                     "DASHBOARD" -> "DASHBOARD"
@@ -942,15 +1007,31 @@ fun DashboardScreen(
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f)
                         )
+                        if (isShowingCachedOfflineData) {
+                            TextButton(
+                                onClick = { viewModel.refreshSpreadsheetData(force = true) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("error_retry_sync_button")
+                            ) {
+                                Text(
+                                    text = "Coba Lagi",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
                         IconButton(
                             onClick = { viewModel.errorMessage.value = null },
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(48.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Close,
                                 contentDescription = "Tutup",
                                 tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -5863,36 +5944,14 @@ fun DashboardScreen(
 
     // Global access & login dialogs
     if (showLoginDialog) {
-        var pn by remember { mutableStateOf(viewModel.loggedInPN.value) }
-        AlertDialog(
-            onDismissRequest = { showLoginDialog = false },
-            containerColor = Color.White,
-            title = { 
-                Text("Kelola Akses PN", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) 
+        PnLoginPopupDialog(
+            initialPn = viewModel.loggedInPN.value,
+            onDismiss = { showLoginDialog = false },
+            onLogin = { pn ->
+                viewModel.saveLogin(pn)
+                showLoginDialog = false
             },
-            text = { 
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Masukkan PN Pengelola untuk memfilter data kelolaan Anda.", style = MaterialTheme.typography.bodySmall)
-                    OutlinedTextField(
-                        value = pn, 
-                        onValueChange = { pn = it }, 
-                        label = { Text("PN Mantri") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { 
-                    viewModel.saveLogin(pn)
-                    showLoginDialog = false 
-                }) { Text("Simpan") }
-            },
-            dismissButton = {
-                TextButton(onClick = { 
-                    showConfirmLogoff = true
-                }) { Text("Logoff", color = Color(0xFFD32F2F)) }
-            }
+            onLogoffClick = { showConfirmLogoff = true }
         )
     }
 

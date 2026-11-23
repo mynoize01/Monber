@@ -40,6 +40,7 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import com.example.BuildConfig
+import com.example.ui.components.PnLoginPopupDialog
 import com.example.ui.viewmodel.CustomerViewModel
 import com.example.update.AppUpdateManager
 import com.example.update.AppUpdateState
@@ -1386,41 +1387,14 @@ fun SettingsScreenView(
 
     // Dialog Login PN
     if (showLoginDialog) {
-        var inputPn by remember { mutableStateOf(loggedInPN) }
-        AlertDialog(
-            onDismissRequest = { showLoginDialog = false },
-            containerColor = Color.White,
-            title = {
-                Text("Kelola Akses PN", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        PnLoginPopupDialog(
+            initialPn = loggedInPN,
+            onDismiss = { showLoginDialog = false },
+            onLogin = { inputPn ->
+                viewModel.saveLogin(inputPn)
+                showLoginDialog = false
             },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Masukkan nomor PN Mantri untuk memfilter data kelolaan Anda:", style = MaterialTheme.typography.bodySmall)
-                    OutlinedTextField(
-                        value = inputPn,
-                        onValueChange = { inputPn = it },
-                        label = { Text("Nomor PN") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.saveLogin(inputPn)
-                        showLoginDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF))
-                ) {
-                    Text("Simpan")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLoginDialog = false }) {
-                    Text("Batal")
-                }
-            }
+            onLogoffClick = { showConfirmLogoff = true }
         )
     }
 

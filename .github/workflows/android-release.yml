@@ -1,0 +1,85 @@
+name: Build & Release Android APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Versi tag rilis (contoh: v1.4, harus lebih besar dari versionName sebelumnya)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release-apk:
+    name: Build APK & Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Prepare Keystore & Build APK
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          GRADLE_CMD="gradle"
+          if [ -x "./gradlew" ]; then
+            GRADLE_CMD="./gradlew"
+          fi
+
+          mkdir -p dist
+
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "Building Release APK using configured GitHub Secrets keystore..."
+            echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > my-upload-key.jks
+            export KEYSTORE_PATH="$PWD/my-upload-key.jks"
+            $GRADLE_CMD :app:assembleRelease --no-daemon --stacktrace
+            APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          else
+            echo "Release keystore secrets not configured; building Debug APK with debug.keystore..."
+            if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
+              base64 -d debug.keystore.base64 > debug.keystore
+            fi
+            $GRADLE_CMD :app:assembleDebug --no-daemon --stacktrace
+            APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          fi
+
+          if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
+            echo "Error: Built APK file not found!"
+            exit 1
+          fi
+
+          cp "$APK_PATH" "dist/MonBer-${TAG_NAME}.apk"
+          echo "Prepared artifact: dist/MonBer-${TAG_NAME}.apk"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name || github.ref_name }}
+          name: MonBer ${{ inputs.tag_name || github.ref_name }}
+          generate_release_notes: true
+          make_latest: true
+          prerelease: false
+          files: dist/*.apk
