@@ -24,9 +24,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import com.example.data.network.SpreadsheetService
 import com.example.data.local.LocalSummaryCache
+import com.example.update.AppUpdateInstallReceiver
 import com.example.update.AppUpdateManager
 import com.example.update.AppUpdateState
 import com.example.update.GitHubReleaseInfo
+import com.example.update.PackageInstallEvent
 
 enum class SortColumn {
     NAMA_NASABAH, PLAFOND, OS_PINJAMAN, UPDATE_POKOK, SETOR_POKOK, SEGMEN, KOLEK, UMUR_TGK, KOL_BY_LW, NAMA_MANTRI, NPD, ALAMAT, DESA, ALIH_TAGIH, SISA_BUNGA, TOTAL_DH
@@ -2938,6 +2940,24 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         }
+        viewModelScope.launch {
+            AppUpdateInstallReceiver.events.collect { event ->
+                when (event) {
+                    is PackageInstallEvent.PromptLaunched -> {
+                        showUpdateDialog.value = false
+                    }
+                    is PackageInstallEvent.Succeeded -> {
+                        val currentVer = AppUpdateManager.getCurrentVersionName(getApplication())
+                        appUpdateState.value = AppUpdateState.UpToDate(currentVer)
+                        showUpdateDialog.value = false
+                    }
+                    is PackageInstallEvent.Failed -> {
+                        appUpdateState.value = AppUpdateState.Error(event.message)
+                        showUpdateDialog.value = true
+                    }
+                }
+            }
+        }
         if (githubUpdateRepo.value.isBlank()) {
             saveGithubUpdateRepo("https://github.com/mynoize01/Monber.git")
         }
@@ -3826,11 +3846,11 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
 
         downloadResult.onSuccess { apkFile ->
             if (AppUpdateManager.canRequestPackageInstalls(appContext)) {
-                val launched = AppUpdateManager.launchApkInstaller(appContext, apkFile)
-                appUpdateState.value = if (launched) {
-                    AppUpdateState.ReadyToInstall(release, apkFile)
-                } else {
-                    AppUpdateState.Error("Gagal membuka penginstal aplikasi.")
+                appUpdateState.value = AppUpdateState.ReadyToInstall(release, apkFile)
+                val launched = AppUpdateManager.installApk(appContext, apkFile)
+                if (!launched) {
+                    appUpdateState.value = AppUpdateState.Error("Gagal membuka penginstal aplikasi.")
+                    showUpdateDialog.value = true
                 }
             } else {
                 appUpdateState.value = AppUpdateState.NeedsInstallPermission(release, apkFile)
@@ -3838,6 +3858,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             }
         }.onFailure { error ->
             appUpdateState.value = AppUpdateState.Error(error.message ?: "Gagal mengunduh file APK pembaruan.")
+            showUpdateDialog.value = true
         }
     }
 
@@ -3846,17 +3867,28 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         when (val state = appUpdateState.value) {
             is AppUpdateState.NeedsInstallPermission -> {
                 if (AppUpdateManager.canRequestPackageInstalls(appContext)) {
-                    val launched = AppUpdateManager.launchApkInstaller(appContext, state.apkFile)
-                    if (launched) {
+                    viewModelScope.launch {
                         appUpdateState.value = AppUpdateState.ReadyToInstall(state.release, state.apkFile)
+                        val launched = AppUpdateManager.installApk(appContext, state.apkFile)
+                        if (!launched) {
+                            appUpdateState.value = AppUpdateState.Error("Gagal membuka penginstal aplikasi.")
+                            showUpdateDialog.value = true
+                        }
                     }
                 }
             }
             is AppUpdateState.ReadyToInstall -> {
                 if (AppUpdateManager.canRequestPackageInstalls(appContext)) {
-                    AppUpdateManager.launchApkInstaller(appContext, state.apkFile)
+                    viewModelScope.launch {
+                        val launched = AppUpdateManager.installApk(appContext, state.apkFile)
+                        if (!launched) {
+                            appUpdateState.value = AppUpdateState.Error("Gagal membuka penginstal aplikasi.")
+                            showUpdateDialog.value = true
+                        }
+                    }
                 } else {
                     appUpdateState.value = AppUpdateState.NeedsInstallPermission(state.release, state.apkFile)
+                    showUpdateDialog.value = true
                 }
             }
             else -> Unit

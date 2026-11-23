@@ -102,11 +102,17 @@ jobs:
 
           GRADLE_CI_FLAGS="--no-daemon --no-configuration-cache --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g --stacktrace"
 
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_TAG" ]; then
-            ARTIFACT_LABEL="$INPUT_TAG"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ -n "$INPUT_TAG" ]; then
+              RELEASE_TAG="$INPUT_TAG"
+            else
+              VER_NAME=$(grep -m1 'versionName' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
+              RELEASE_TAG="v${VER_NAME}"
+            fi
           else
-            ARTIFACT_LABEL="$REF_NAME"
+            RELEASE_TAG="$REF_NAME"
           fi
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
 
           if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
             echo "Building Release APK using configured GitHub Secrets keystore..."
@@ -138,8 +144,8 @@ jobs:
             exit 1
           fi
 
-          cp "$APK_PATH" "dist/MonBer-${ARTIFACT_LABEL}.apk"
-          echo "Prepared artifact: dist/MonBer-${ARTIFACT_LABEL}.apk"
+          cp "$APK_PATH" "dist/MonBer-${RELEASE_TAG}.apk"
+          echo "Prepared artifact: dist/MonBer-${RELEASE_TAG}.apk"
 
       - name: Run Unit Tests
         run: |
@@ -156,11 +162,11 @@ jobs:
           path: dist/*.apk
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '')
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag_name || github.ref_name }}
-          name: MonBer ${{ inputs.tag_name || github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: MonBer ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           make_latest: 'true'
           prerelease: false

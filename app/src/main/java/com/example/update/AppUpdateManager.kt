@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -21,8 +22,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
@@ -144,8 +147,16 @@ object AppUpdateManager {
 
         // 2. GitHub Releases API URL directly
         if (trimmed.startsWith("https://api.github.com/repos/", ignoreCase = true)) {
-            val apiUrl = if (trimmed.endsWith("/releases/latest")) trimmed else "$trimmed/releases/latest"
-            return listOf(apiUrl)
+            return when {
+                trimmed.endsWith("/releases/latest", ignoreCase = true) -> {
+                    val baseReleases = trimmed.removeSuffix("/latest").removeSuffix("/LATEST")
+                    listOf(trimmed, "$baseReleases?per_page=10")
+                }
+                trimmed.endsWith("/releases", ignoreCase = true) -> {
+                    listOf("$trimmed/latest", "$trimmed?per_page=10")
+                }
+                else -> listOf("$trimmed/releases/latest", "$trimmed/releases?per_page=10")
+            }
         }
 
         // 3. Direct remote JSON URL on GitHub raw, Gist, or any other host
@@ -168,6 +179,7 @@ object AppUpdateManager {
             val repo = match.groupValues[2].removeSuffix(".git")
             return listOf(
                 "https://api.github.com/repos/$owner/$repo/releases/latest",
+                "https://api.github.com/repos/$owner/$repo/releases?per_page=10",
                 "https://raw.githubusercontent.com/$owner/$repo/main/version.json",
                 "https://raw.githubusercontent.com/$owner/$repo/master/version.json"
             )
@@ -180,6 +192,7 @@ object AppUpdateManager {
             val repo = slugMatch.groupValues[2].removeSuffix(".git")
             return listOf(
                 "https://api.github.com/repos/$owner/$repo/releases/latest",
+                "https://api.github.com/repos/$owner/$repo/releases?per_page=10",
                 "https://raw.githubusercontent.com/$owner/$repo/main/version.json",
                 "https://raw.githubusercontent.com/$owner/$repo/master/version.json"
             )
@@ -223,47 +236,34 @@ object AppUpdateManager {
     }
 
     /**
-     * Parses either a GitHub Releases API JSON response or a generic remote `version.json` file.
+     * Parses either a GitHub Releases API JSON response (single object or release list array)
+     * or a generic remote `version.json` file.
      */
     fun parseVersionJson(bodyStr: String, sourceUrl: String = ""): GitHubReleaseInfo {
-        val json = JSONObject(bodyStr)
+        val trimmedBody = bodyStr.trim()
+        if (trimmedBody.startsWith("[")) {
+            val releasesArray = JSONArray(trimmedBody)
+            var firstNonDraft: GitHubReleaseInfo? = null
+            for (i in 0 until releasesArray.length()) {
+                val obj = releasesArray.optJSONObject(i) ?: continue
+                if (obj.optBoolean("draft", false)) continue
+                val parsed = parseGitHubReleaseObject(obj)
+                if (firstNonDraft == null) {
+                    firstNonDraft = parsed
+                }
+                if (!parsed.apkDownloadUrl.isNullOrBlank()) {
+                    return parsed
+                }
+            }
+            if (firstNonDraft != null) return firstNonDraft
+            throw IllegalStateException("Tidak ada rilis yang tersedia dari $sourceUrl.")
+        }
+
+        val json = JSONObject(trimmedBody)
         val isGitHubReleaseJson = json.has("tag_name") && json.has("assets")
 
         if (isGitHubReleaseJson) {
-            val tagName = json.optString("tag_name", "").trim()
-            val releaseName = json.optString("name", tagName).ifBlank { tagName }
-            val releaseNotes = json.optString("body", "").trim()
-            val htmlUrl = json.optString("html_url", "")
-            val assets = json.optJSONArray("assets")
-
-            var apkUrl: String? = null
-            var apkName: String? = null
-            var apkSize = 0L
-
-            if (assets != null) {
-                for (i in 0 until assets.length()) {
-                    val asset = assets.optJSONObject(i) ?: continue
-                    val name = asset.optString("name", "")
-                    if (name.endsWith(".apk", ignoreCase = true)) {
-                        apkUrl = asset.optString("browser_download_url", "").ifBlank { null }
-                        apkName = name
-                        apkSize = asset.optLong("size", 0L)
-                        break
-                    }
-                }
-            }
-
-            return GitHubReleaseInfo(
-                tagName = tagName,
-                versionName = normalizeVersionNumber(tagName),
-                releaseName = releaseName,
-                releaseNotes = releaseNotes,
-                htmlUrl = htmlUrl,
-                apkDownloadUrl = apkUrl,
-                apkFileName = apkName,
-                apkSizeBytes = apkSize,
-                versionCode = json.optInt("versionCode", json.optInt("version_code", 0))
-            )
+            return parseGitHubReleaseObject(json)
         }
 
         // Generic remote version.json manifest (GitHub raw, Gist, or any other host)
@@ -354,6 +354,43 @@ object AppUpdateManager {
         )
     }
 
+    private fun parseGitHubReleaseObject(json: JSONObject): GitHubReleaseInfo {
+        val tagName = json.optString("tag_name", "").trim()
+        val releaseName = json.optString("name", tagName).ifBlank { tagName }
+        val releaseNotes = json.optString("body", "").trim()
+        val htmlUrl = json.optString("html_url", "")
+        val assets = json.optJSONArray("assets")
+
+        var apkUrl: String? = null
+        var apkName: String? = null
+        var apkSize = 0L
+
+        if (assets != null) {
+            for (i in 0 until assets.length()) {
+                val asset = assets.optJSONObject(i) ?: continue
+                val name = asset.optString("name", "")
+                if (name.endsWith(".apk", ignoreCase = true)) {
+                    apkUrl = asset.optString("browser_download_url", "").ifBlank { null }
+                    apkName = name
+                    apkSize = asset.optLong("size", 0L)
+                    break
+                }
+            }
+        }
+
+        return GitHubReleaseInfo(
+            tagName = tagName,
+            versionName = normalizeVersionNumber(tagName),
+            releaseName = releaseName,
+            releaseNotes = releaseNotes,
+            htmlUrl = htmlUrl,
+            apkDownloadUrl = apkUrl,
+            apkFileName = apkName,
+            apkSizeBytes = apkSize,
+            versionCode = json.optInt("versionCode", json.optInt("version_code", 0))
+        )
+    }
+
     private fun firstNonBlank(vararg values: String): String {
         return values.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
     }
@@ -368,6 +405,7 @@ object AppUpdateManager {
             }
 
             var lastErrorMessage: String? = null
+            var fallbackRelease: GitHubReleaseInfo? = null
             for (endpointUrl in candidateUrls) {
                 try {
                     val isGitHubApi = endpointUrl.contains("api.github.com", ignoreCase = true)
@@ -383,19 +421,27 @@ object AppUpdateManager {
                     client.newCall(request).execute().use { response ->
                         val bodyStr = response.body?.string().orEmpty()
                         if (response.isSuccessful && bodyStr.isNotBlank()) {
-                            return@withContext Result.success(parseVersionJson(bodyStr, endpointUrl))
-                        }
-
-                        lastErrorMessage = when (response.code) {
-                            404 -> "Rilis atau file version.json tidak ditemukan (404)."
-                            403 -> "Batas akses server tercapai (HTTP 403). Coba beberapa saat lagi."
-                            else -> "Gagal memeriksa pembaruan (HTTP ${response.code})."
+                            val parsed = parseVersionJson(bodyStr, endpointUrl)
+                            if (!parsed.apkDownloadUrl.isNullOrBlank()) {
+                                return@withContext Result.success(parsed)
+                            }
+                            if (fallbackRelease == null) {
+                                fallbackRelease = parsed
+                            }
+                        } else {
+                            lastErrorMessage = when (response.code) {
+                                404 -> "Rilis atau file version.json tidak ditemukan (404)."
+                                403 -> "Batas akses server tercapai (HTTP 403). Coba beberapa saat lagi."
+                                else -> "Gagal memeriksa pembaruan (HTTP ${response.code})."
+                            }
                         }
                     }
                 } catch (e: Exception) {
                     lastErrorMessage = e.message ?: "Gagal menghubungi server pembaruan."
                 }
             }
+
+            fallbackRelease?.let { return@withContext Result.success(it) }
 
             Result.failure(
                 IllegalStateException(
@@ -439,6 +485,13 @@ object AppUpdateManager {
                     )
                 }
 
+                val contentType = response.header("Content-Type").orEmpty()
+                if (contentType.startsWith("text/html", ignoreCase = true)) {
+                    return@withContext Result.failure(
+                        IllegalStateException("URL unduhan mengembalikan halaman HTML, bukan file APK.")
+                    )
+                }
+
                 val body = response.body
                     ?: return@withContext Result.failure(IllegalStateException("Respons unduhan kosong."))
 
@@ -447,7 +500,7 @@ object AppUpdateManager {
 
                 body.byteStream().use { input ->
                     FileOutputStream(targetFile).use { output ->
-                        val buffer = ByteArray(8 * 1024)
+                        val buffer = ByteArray(16 * 1024)
                         var downloadedBytes = 0L
                         var lastReportedPercent = -1
                         while (true) {
@@ -470,9 +523,28 @@ object AppUpdateManager {
                 }
             }
 
+            if (!isValidApkFile(targetFile)) {
+                targetFile.delete()
+                return@withContext Result.failure(
+                    IllegalStateException("File yang diunduh bukan paket APK yang valid.")
+                )
+            }
+
             Result.success(targetFile)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    private fun isValidApkFile(file: File): Boolean {
+        if (!file.exists() || file.length() < 4L) return false
+        return try {
+            FileInputStream(file).use { input ->
+                val header = ByteArray(2)
+                input.read(header) == 2 && header[0] == 0x50.toByte() && header[1] == 0x4B.toByte()
+            }
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -493,6 +565,83 @@ object AppUpdateManager {
         } else {
             Intent(Settings.ACTION_SECURITY_SETTINGS)
         }
+    }
+
+    suspend fun installApkWithPackageInstaller(
+        context: Context,
+        apkFile: File
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        var session: PackageInstaller.Session? = null
+        try {
+            if (!apkFile.exists() || apkFile.length() <= 0L) {
+                return@withContext Result.failure(
+                    IllegalStateException("File APK pembaruan tidak ditemukan atau kosong.")
+                )
+            }
+
+            val packageInstaller = context.packageManager.packageInstaller
+            val params = PackageInstaller.SessionParams(
+                PackageInstaller.SessionParams.MODE_FULL_INSTALL
+            ).apply {
+                setAppPackageName(context.packageName)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+                }
+            }
+
+            val sessionId = packageInstaller.createSession(params)
+            session = packageInstaller.openSession(sessionId)
+
+            session.openWrite("monber_update.apk", 0, apkFile.length()).use { out ->
+                FileInputStream(apkFile).use { input ->
+                    val buffer = ByteArray(16 * 1024)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read == -1) break
+                        out.write(buffer, 0, read)
+                    }
+                }
+                session.fsync(out)
+            }
+
+            val callbackIntent = Intent(context, AppUpdateInstallReceiver::class.java).apply {
+                action = "${context.packageName}.ACTION_APP_UPDATE_INSTALL_STATUS"
+            }
+            val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val statusPendingIntent = PendingIntent.getBroadcast(
+                context,
+                sessionId,
+                callbackIntent,
+                pendingIntentFlags
+            )
+
+            session.commit(statusPendingIntent.intentSender)
+            session.close()
+            session = null
+            Result.success(Unit)
+        } catch (e: Exception) {
+            try {
+                session?.abandon()
+            } catch (_: Exception) {
+            }
+            try {
+                session?.close()
+            } catch (_: Exception) {
+            }
+            Result.failure(e)
+        }
+    }
+
+    suspend fun installApk(context: Context, apkFile: File): Boolean {
+        val packageInstallerResult = installApkWithPackageInstaller(context, apkFile)
+        if (packageInstallerResult.isSuccess) {
+            return true
+        }
+        return launchApkInstaller(context, apkFile)
     }
 
     fun launchApkInstaller(context: Context, apkFile: File): Boolean {

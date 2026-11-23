@@ -16,6 +16,7 @@ class AppUpdateManagerTest {
         assertEquals(
             listOf(
                 "https://api.github.com/repos/mynoize01/Monber/releases/latest",
+                "https://api.github.com/repos/mynoize01/Monber/releases?per_page=10",
                 "https://raw.githubusercontent.com/mynoize01/Monber/main/version.json",
                 "https://raw.githubusercontent.com/mynoize01/Monber/master/version.json"
             ),
@@ -89,6 +90,58 @@ class AppUpdateManagerTest {
         assertEquals("1.5", parsed.versionName)
         assertEquals("MonBer-v1.5.apk", parsed.apkFileName)
         assertEquals(10485760L, parsed.apkSizeBytes)
+    }
+
+    @Test
+    fun `parseVersionJson selects non-draft release with apk asset from GitHub releases array`() {
+        val releasesArrayJson = """
+            [
+              {
+                "tag_name": "v1.4.7-draft",
+                "draft": true,
+                "name": "Draft Release",
+                "assets": [
+                  {
+                    "name": "MonBer-v1.4.7-draft.apk",
+                    "browser_download_url": "https://example.com/draft.apk",
+                    "size": 999
+                  }
+                ]
+              },
+              {
+                "tag_name": "v1.4.6",
+                "draft": false,
+                "name": "Tag Without APK",
+                "assets": []
+              },
+              {
+                "tag_name": "v1.4.5",
+                "draft": false,
+                "name": "MonBer v1.4.5",
+                "html_url": "https://github.com/mynoize01/Monber/releases/tag/v1.4.5",
+                "assets": [
+                  {
+                    "name": "MonBer-v1.4.5.apk",
+                    "browser_download_url": "https://github.com/mynoize01/Monber/releases/download/v1.4.5/MonBer-v1.4.5.apk",
+                    "size": 12345678
+                  }
+                ]
+              }
+            ]
+        """.trimIndent()
+
+        val parsed = AppUpdateManager.parseVersionJson(
+            releasesArrayJson,
+            "https://api.github.com/repos/mynoize01/Monber/releases?per_page=10"
+        )
+
+        assertEquals("v1.4.5", parsed.tagName)
+        assertEquals("1.4.5", parsed.versionName)
+        assertEquals("MonBer-v1.4.5.apk", parsed.apkFileName)
+        assertEquals(
+            "https://github.com/mynoize01/Monber/releases/download/v1.4.5/MonBer-v1.4.5.apk",
+            parsed.apkDownloadUrl
+        )
     }
 
     @Test

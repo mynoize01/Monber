@@ -6522,6 +6522,21 @@ fun DashboardScreen(
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
+                            if (release.apkDownloadUrl.isNullOrBlank()) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFFFFF7ED),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFED7AA)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = "Asset file .apk belum ditemukan pada rilis GitHub ${release.tagName}. Pastikan file APK sudah terlampir di GitHub Releases, lalu ketuk Periksa Ulang.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFF9A3412),
+                                        modifier = Modifier.padding(10.dp)
+                                    )
+                                }
+                            }
                             if (release.releaseNotes.isNotBlank()) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
@@ -6557,19 +6572,20 @@ fun DashboardScreen(
                             ) {
                                 Text("Update & Instal", fontWeight = FontWeight.Bold)
                             }
-                        } else if (release.htmlUrl.isNotBlank()) {
+                        } else {
                             Button(
                                 onClick = {
-                                    viewModel.dismissUpdateDialog()
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(release.htmlUrl))
-                                    context.startActivity(intent)
+                                    viewModel.checkForUpdates(
+                                        autoInstallOnFind = true,
+                                        isAutoBackgroundCheck = false
+                                    )
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
                                 modifier = Modifier
                                     .heightIn(min = 48.dp)
-                                    .testTag("dialog_update_open_link_button")
+                                    .testTag("dialog_update_retry_check_button")
                             ) {
-                                Text("Buka Tautan", fontWeight = FontWeight.Bold)
+                                Text("Periksa Ulang", fontWeight = FontWeight.Bold)
                             }
                         }
                     },
@@ -6668,7 +6684,9 @@ fun DashboardScreen(
                                 )
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF97316)),
-                            modifier = Modifier.heightIn(min = 48.dp)
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("dialog_update_permission_button")
                         ) {
                             Text("Buka Pengaturan", fontWeight = FontWeight.Bold)
                         }
@@ -6697,7 +6715,7 @@ fun DashboardScreen(
                     },
                     text = {
                         Text(
-                            text = "File APK versi ${state.release.tagName} berhasil diunduh. Ketuk Instal untuk memasang pembaruan.",
+                            text = "File APK versi ${state.release.tagName} berhasil diunduh. Ketuk Instal Sekarang untuk membuka dialog instalasi aplikasi.",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF334155)
                         )
@@ -6706,7 +6724,7 @@ fun DashboardScreen(
                         Button(
                             onClick = {
                                 if (AppUpdateManager.canRequestPackageInstalls(context)) {
-                                    AppUpdateManager.launchApkInstaller(context, state.apkFile)
+                                    viewModel.retryInstallAfterPermissionGranted()
                                 } else {
                                     updateInstallPermissionLauncher.launch(
                                         AppUpdateManager.createInstallPermissionIntent(context)
@@ -6714,7 +6732,9 @@ fun DashboardScreen(
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
-                            modifier = Modifier.heightIn(min = 48.dp)
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("dialog_update_ready_install_button")
                         ) {
                             Text("Instal Sekarang", fontWeight = FontWeight.Bold)
                         }
@@ -6722,6 +6742,65 @@ fun DashboardScreen(
                     dismissButton = {
                         TextButton(
                             onClick = { viewModel.dismissUpdateDialog() },
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) {
+                            Text("Tutup")
+                        }
+                    }
+                )
+            }
+            is AppUpdateState.Error -> {
+                AlertDialog(
+                    onDismissRequest = {
+                        viewModel.dismissUpdateDialog()
+                        viewModel.clearUpdateStatus()
+                    },
+                    containerColor = Color.White,
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.SecurityUpdateWarning,
+                            contentDescription = "Pembaruan Gagal",
+                            tint = Color(0xFFDC2626),
+                            modifier = Modifier.size(32.dp)
+                        )
+                    },
+                    title = {
+                        Text(
+                            text = "Pembaruan Gagal",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF991B1B)
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = state.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF334155)
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                viewModel.checkForUpdates(
+                                    autoInstallOnFind = true,
+                                    isAutoBackgroundCheck = false
+                                )
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("dialog_update_error_retry_button")
+                        ) {
+                            Text("Coba Lagi", fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                viewModel.dismissUpdateDialog()
+                                viewModel.clearUpdateStatus()
+                            },
                             modifier = Modifier.heightIn(min = 48.dp)
                         ) {
                             Text("Tutup")

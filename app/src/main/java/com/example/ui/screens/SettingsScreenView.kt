@@ -1200,7 +1200,7 @@ fun SettingsScreenView(
                     }
                     is AppUpdateState.ReadyToInstall -> {
                         if (AppUpdateManager.canRequestPackageInstalls(context)) {
-                            AppUpdateManager.launchApkInstaller(context, state.apkFile)
+                            viewModel.retryInstallAfterPermissionGranted()
                         } else {
                             installPermissionLauncher.launch(
                                 AppUpdateManager.createInstallPermissionIntent(context)
