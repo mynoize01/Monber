@@ -102,16 +102,19 @@ jobs:
 
           GRADLE_CI_FLAGS="--no-daemon --no-configuration-cache --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g --stacktrace"
 
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            if [ -n "$INPUT_TAG" ]; then
-              RELEASE_TAG="$INPUT_TAG"
-            else
-              VER_NAME=$(grep -m1 'versionName' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
-              RELEASE_TAG="v${VER_NAME}"
-            fi
-          else
+          REF_FULL="${{ github.ref }}"
+          if [[ "$REF_FULL" == refs/tags/* ]]; then
             RELEASE_TAG="$REF_NAME"
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_TAG" ]; then
+            RELEASE_TAG="$INPUT_TAG"
+          else
+            VER_NAME=$(grep -m1 'versionName' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/' | tr -d '[:space:]')
+            if [ -z "$VER_NAME" ]; then
+              VER_NAME="1.0.0"
+            fi
+            RELEASE_TAG="v${VER_NAME}"
           fi
+          echo "Resolved RELEASE_TAG=$RELEASE_TAG"
           echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
 
           if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
@@ -162,12 +165,16 @@ jobs:
           path: dist/*.apk
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
           name: MonBer ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           make_latest: 'true'
           prerelease: false
+          overwrite_files: true
           files: dist/*.apk
