@@ -55,7 +55,25 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all {
+        it.systemProperty(
+          "robolectric.dependency.repo.url",
+          "https://maven-central.storage-download.googleapis.com/maven2"
+        )
+        it.systemProperty(
+          "robolectric.dependency.repo.id",
+          "google-maven-central-mirror"
+        )
+      }
+    }
+  }
+}
+
+configurations.matching { it.name.contains("UnitTest", ignoreCase = true) }.configureEach {
+  resolutionStrategy.cacheDynamicVersionsFor(24, "hours")
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
