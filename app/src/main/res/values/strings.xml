@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">MonBer app</string>
+    <string name="app_name">MonBer</string>
     <string name="search_placeholder">Cari Nasabah atau Mantri...</string>
     <string name="filter_label">Filter Kolek (Dpk123)</string>
     <string name="menu_intrakomp">Intrakomp</string>

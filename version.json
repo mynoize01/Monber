@@ -1,10 +1,10 @@
 {
-  "versionCode": 8,
-  "versionName": "1.4.7",
-  "tagName": "v1.4.7",
-  "releaseName": "MonBer v1.4.7",
-  "releaseNotes": "Pembaruan in-app dengan PackageInstaller API, pill biru pada hasil GlobalSearchPopup, popup login PN yang lebih rapi, Room Database caching offline, dan rilis GitHub otomatis.",
-  "apkUrl": "https://github.com/mynoize01/Monber/releases/download/v1.4.7/MonBer-v1.4.7.apk",
-  "htmlUrl": "https://github.com/mynoize01/Monber/releases/tag/v1.4.7",
+  "versionCode": 9,
+  "versionName": "1.4.8",
+  "tagName": "v1.4.8",
+  "releaseName": "MonBer v1.4.8",
+  "releaseNotes": "Nama aplikasi diperbarui menjadi MonBer, tampilan pill No Rek & OS pencarian global lebih ringkas tanpa Rp, kartu Input Link terpisah, popup Pengaturan Aplikasi (Mode Offline & Edit Teks WA) via ikon gear, serta gabungan Kalkulator Pinjaman (Anuitas) & Kalkulator Selisih Bulan.",
+  "apkUrl": "https://github.com/mynoize01/Monber/releases/download/v1.4.8/MonBer-v1.4.8.apk",
+  "htmlUrl": "https://github.com/mynoize01/Monber/releases/tag/v1.4.8",
   "apkSizeBytes": 0
 }

@@ -40,6 +40,7 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import com.example.BuildConfig
+import com.example.ui.components.LoanAnnuityCalculatorSection
 import com.example.ui.components.PnLoginPopupDialog
 import com.example.ui.viewmodel.CustomerViewModel
 import com.example.update.AppUpdateManager
@@ -54,6 +55,7 @@ fun SettingsScreenView(
     val clipboardManager = LocalClipboardManager.current
     val scrollState = rememberScrollState()
     var showEditWaDialog by remember { mutableStateOf(false) }
+    var showAppPreferencesDialog by remember { mutableStateOf(false) }
 
     // ViewModel states
     val isRefreshing by viewModel.isRefreshing.collectAsState()
@@ -277,7 +279,52 @@ fun SettingsScreenView(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Pengaturan Aplikasi & Input Link
+        // 1. Pengaturan Aplikasi (Ikon Gear membuka popup Mode Offline & Pengaturan Teks WA)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text(
+                        text = "Pengaturan Aplikasi",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF00386B)
+                    )
+                    Text(
+                        text = "Mode offline & pengaturan teks pesan WA",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF535F70)
+                    )
+                }
+                IconButton(
+                    onClick = { showAppPreferencesDialog = true },
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFFEBF5FF))
+                        .testTag("app_settings_gear_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Buka Pengaturan Aplikasi",
+                        tint = Color(0xFF005FAF),
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+        }
+
+        // 2. Input Link (Kotak Mandiri Terpisah)
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -295,24 +342,24 @@ fun SettingsScreenView(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Pengaturan Aplikasi",
+                            text = "Input Link",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF00386B)
                         )
                         Text(
-                            text = "Kelola link data spreadsheet & preferensi sistem",
+                            text = "Kelola link spreadsheet Daily, Monthly & LW321 All",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF535F70)
                         )
                     }
                     Icon(
-                        imageVector = Icons.Default.Settings,
+                        imageVector = Icons.Default.Link,
                         contentDescription = null,
                         tint = Color(0xFF005FAF),
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
 
@@ -665,184 +712,8 @@ fun SettingsScreenView(
                 }
                 }
             }
-
-                HorizontalDivider(color = Color(0xFFE2E8F0))
-
-                // Mode Offline (Digabung dalam Pengaturan Aplikasi, di bawah Input Link)
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFFF8FAFC),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                modifier = Modifier.weight(1f),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.SdCard,
-                                    contentDescription = null,
-                                    tint = Color(0xFF005FAF),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Column {
-                                    Text(
-                                        text = "Mode Offline",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF00386B)
-                                    )
-                                    Text(
-                                        text = if (isOfflineModeEnabled) "Menggunakan file CSV lokal" else "Mengambil spreadsheet online",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color(0xFF64748B)
-                                    )
-                                }
-                            }
-
-                            Switch(
-                                checked = isOfflineModeEnabled,
-                                onCheckedChange = { viewModel.toggleOfflineMode(it) }
-                            )
-                        }
-
-                        AnimatedVisibility(visible = isOfflineModeEnabled) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                HorizontalDivider(color = Color(0xFFE2E8F0))
-
-                                Text(
-                                    text = "Pilih File CSV Lokal:",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF00386B)
-                                )
-
-                                @Composable
-                                fun LocalFileRow(key: String, label: String, currentName: String) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
-                                            Text(
-                                                text = if (currentName.isNotBlank()) currentName else "Belum ada file",
-                                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
-                                                color = if (currentName.isNotBlank()) Color(0xFF005FAF) else Color.Gray,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                        Button(
-                                            onClick = {
-                                                activeFileKey = key
-                                                fileLauncher.launch("*/*")
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                            modifier = Modifier.height(32.dp)
-                                        ) {
-                                            Text("Pilih", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                        if (currentName.isNotBlank()) {
-                                            IconButton(
-                                                onClick = { viewModel.deleteOfflineFile(key) },
-                                                modifier = Modifier.size(32.dp)
-                                            ) {
-                                                Icon(Icons.Default.Delete, contentDescription = "Hapus", tint = Color.Red, modifier = Modifier.size(16.dp))
-                                            }
-                                        }
-                                    }
-                                }
-
-                                LocalFileRow("url_1", "LW321 Bulan Lalu", offlineNameUrl1)
-                                LocalFileRow("url_2", "LW321 Akhir Bulan", offlineNameUrl2)
-                                LocalFileRow("url_3", "LW321 Daily", offlineNameUrl3)
-                                LocalFileRow("url_4", "Database LW321", offlineNameUrl4)
-                                LocalFileRow("e_url_1", "LW325 Akhir Bulan", offlineNameEUrl1)
-                                LocalFileRow("e_url_2", "Database LW325", offlineNameEUrl2)
-                                LocalFileRow("k_url_1", "Database Kelolaan", offlineNameKUrl1)
-                                LocalFileRow("di319_url", "DI319", offlineNameDi319Url)
-                                LocalFileRow("lw325_daily_url", "LW325 Daily", offlineNameLw325Daily)
-                            }
-                        }
-                    }
-                }
-            }
         }
-
-        // 4. Pengaturan Edit Teks Pesan WhatsApp (Dibawah kolom Mode Offline)
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            painter = painterResource(id = com.example.R.drawable.ic_whatsapp),
-                            contentDescription = null,
-                            tint = Color.Unspecified,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Column {
-                            Text(
-                                text = "Pengaturan Edit Teks WA",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF00386B)
-                            )
-                            Text(
-                                text = "Edit template pesan WA Menu Rencana & Detail Debitur",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF64748B)
-                            )
-                        }
-                    }
-
-                    IconButton(
-                        onClick = { showEditWaDialog = true }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Edit Teks",
-                            modifier = Modifier.size(22.dp),
-                            tint = Color(0xFF005FAF)
-                        )
-                    }
-                }
-            }
-        }
+    }
 
         // 3. Akun Pengelola / Akses PN Mantri (Posisi paling bawah dibawah mode offline)
         Card(
@@ -941,13 +812,32 @@ fun SettingsScreenView(
                         }
                     }
                 }
+            }
+        }
+
+        // 4. Kalkulator Pinjaman & Kalkulator Selisih Bulan (Dalam Satu Kotak di Bawah Akses PN Mantri)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Bagian Atas: Kalkulator Pinjaman
+                LoanAnnuityCalculatorSection()
 
                 HorizontalDivider(color = Color(0xFFE2E8F0))
 
-                // Tombol Kalkulator Selisih Bulan (Default Hidden / Tertutup)
+                // Bagian Bawah: Tombol Kalkulator Selisih Bulan (Default Hidden / Tertutup)
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .testTag("month_diff_calc_toggle")
                         .clickable { isCalculatorExpanded = !isCalculatorExpanded },
                     shape = RoundedCornerShape(10.dp),
                     color = if (isCalculatorExpanded) Color(0xFF005FAF) else Color(0xFFF1F5F9),
@@ -1151,7 +1041,7 @@ fun SettingsScreenView(
             }
         }
 
-        // 5. Tombol Refresh / Sinkron Data (Berdiri Sendiri di Luar Kotak Akses PN)
+        // 6. Tombol Refresh / Sinkron Data (Berdiri Sendiri di Luar Kotak Akses PN)
         Button(
             onClick = {
                 viewModel.refreshSpreadsheetData(force = true)
@@ -1433,6 +1323,268 @@ fun SettingsScreenView(
                 }
             }
         )
+    }
+
+    if (showAppPreferencesDialog) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showAppPreferencesDialog = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth(0.94f)
+                    .heightIn(max = 640.dp)
+                    .clip(RoundedCornerShape(16.dp)),
+                color = Color.White,
+                tonalElevation = 6.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Header Popup Pengaturan Aplikasi
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = null,
+                                tint = Color(0xFF005FAF),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "Pengaturan Aplikasi",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF00386B)
+                                )
+                                Text(
+                                    text = "Mode Offline & Pengaturan Teks WA",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = { showAppPreferencesDialog = false },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("close_app_settings_popup")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Tutup Popup Pengaturan",
+                                tint = Color(0xFF64748B)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = Color(0xFFE2E8F0))
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // 1. Mode Offline
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFFF8FAFC),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.SdCard,
+                                            contentDescription = null,
+                                            tint = Color(0xFF005FAF),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Column {
+                                            Text(
+                                                text = "Mode Offline",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF00386B)
+                                            )
+                                            Text(
+                                                text = if (isOfflineModeEnabled) "Menggunakan file CSV lokal" else "Mengambil spreadsheet online",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color(0xFF64748B)
+                                            )
+                                        }
+                                    }
+
+                                    Switch(
+                                        checked = isOfflineModeEnabled,
+                                        onCheckedChange = { viewModel.toggleOfflineMode(it) },
+                                        modifier = Modifier.testTag("popup_offline_mode_switch")
+                                    )
+                                }
+
+                                AnimatedVisibility(visible = isOfflineModeEnabled) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        HorizontalDivider(color = Color(0xFFE2E8F0))
+
+                                        Text(
+                                            text = "Pilih File CSV Lokal:",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF00386B)
+                                        )
+
+                                        @Composable
+                                        fun LocalFileRow(key: String, label: String, currentName: String) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                                                    Text(
+                                                        text = if (currentName.isNotBlank()) currentName else "Belum ada file",
+                                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                                                        color = if (currentName.isNotBlank()) Color(0xFF005FAF) else Color.Gray,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                                Button(
+                                                    onClick = {
+                                                        activeFileKey = key
+                                                        fileLauncher.launch("*/*")
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                                    modifier = Modifier.heightIn(min = 36.dp)
+                                                ) {
+                                                    Text("Pilih", style = MaterialTheme.typography.labelSmall)
+                                                }
+                                                if (currentName.isNotBlank()) {
+                                                    IconButton(
+                                                        onClick = { viewModel.deleteOfflineFile(key) },
+                                                        modifier = Modifier.size(36.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.Delete, contentDescription = "Hapus", tint = Color.Red, modifier = Modifier.size(16.dp))
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        LocalFileRow("url_1", "LW321 Bulan Lalu", offlineNameUrl1)
+                                        LocalFileRow("url_2", "LW321 Akhir Bulan", offlineNameUrl2)
+                                        LocalFileRow("url_3", "LW321 Daily", offlineNameUrl3)
+                                        LocalFileRow("url_4", "Database LW321", offlineNameUrl4)
+                                        LocalFileRow("e_url_1", "LW325 Akhir Bulan", offlineNameEUrl1)
+                                        LocalFileRow("e_url_2", "Database LW325", offlineNameEUrl2)
+                                        LocalFileRow("k_url_1", "Database Kelolaan", offlineNameKUrl1)
+                                        LocalFileRow("di319_url", "DI319", offlineNameDi319Url)
+                                        LocalFileRow("lw325_daily_url", "LW325 Daily", offlineNameLw325Daily)
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2. Pengaturan Edit Teks WA
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showEditWaDialog = true }
+                                .testTag("open_edit_wa_from_popup"),
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFFF8FAFC),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = com.example.R.drawable.ic_whatsapp),
+                                        contentDescription = null,
+                                        tint = Color.Unspecified,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = "Pengaturan Edit Teks WA",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF00386B)
+                                        )
+                                        Text(
+                                            text = "Edit template pesan WA Menu Rencana & Detail Debitur",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF64748B)
+                                        )
+                                    }
+                                }
+                                IconButton(
+                                    onClick = { showEditWaDialog = true },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Edit Teks WA",
+                                        modifier = Modifier.size(22.dp),
+                                        tint = Color(0xFF005FAF)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = { showAppPreferencesDialog = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                    ) {
+                        Text("Tutup", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
     }
 
     if (showEditWaDialog) {

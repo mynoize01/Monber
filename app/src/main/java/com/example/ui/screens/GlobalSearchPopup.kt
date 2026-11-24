@@ -244,7 +244,7 @@ fun GlobalSearchResultCard(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
 
-                // Info No Rek & OS (tanpa awalan Rek:/OS:) dengan background biru & tulisan putih
+                // Info No Rek & OS (tanpa awalan Rek:/OS:/Rp) dengan background biru & tulisan putih seukuran badge kolek
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(3.dp)
@@ -253,11 +253,12 @@ fun GlobalSearchResultCard(
                         modifier = Modifier
                             .clip(RoundedCornerShape(3.dp))
                             .background(BentoPrimary)
-                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                            .padding(horizontal = 4.dp, vertical = 0.5.dp)
                     ) {
                         Text(
                             text = rekStr,
-                            fontSize = 8.5.sp,
+                            fontSize = 8.sp,
+                            lineHeight = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color.White,
                             maxLines = 1
@@ -268,11 +269,12 @@ fun GlobalSearchResultCard(
                         modifier = Modifier
                             .clip(RoundedCornerShape(3.dp))
                             .background(BentoPrimary)
-                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                            .padding(horizontal = 4.dp, vertical = 0.5.dp)
                     ) {
                         Text(
-                            text = "Rp ${formatDoubleClean(osVal, formatter)}",
-                            fontSize = 8.5.sp,
+                            text = formatDoubleClean(osVal, formatter),
+                            fontSize = 8.sp,
+                            lineHeight = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
                             maxLines = 1
@@ -315,7 +317,8 @@ fun GlobalSearchResultCard(
                         ) {
                             Text(
                                 text = if (rawKolek.isNotBlank()) rawKolek else "-",
-                                fontSize = 8.5.sp,
+                                fontSize = 8.sp,
+                                lineHeight = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = kolekColor
                             )
@@ -329,7 +332,8 @@ fun GlobalSearchResultCard(
                         ) {
                             Text(
                                 text = "DH",
-                                fontSize = 8.5.sp,
+                                fontSize = 8.sp,
+                                lineHeight = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF93000A)
                             )
