@@ -83,11 +83,18 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      - name: Restore Cached Debug Keystore
+        uses: actions/cache@v4
+        with:
+          path: debug.keystore
+          key: monber-debug-keystore-v1
+
       - name: Prepare Keystore & Build APK
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
           INPUT_TAG: ${{ inputs.tag_name }}
           REF_NAME: ${{ github.ref_name }}
           EVENT_NAME: ${{ github.event_name }}
@@ -134,22 +141,35 @@ jobs:
             APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           elif [ "$HAS_ANY_RELEASE_SECRET" -eq 1 ]; then
             echo "Error: Release keystore secrets are only partially configured!"
-            echo "Set ALL three secrets (RELEASE_KEYSTORE_BASE64, STORE_PASSWORD, KEY_PASSWORD) or remove all three to use debug.keystore.base64."
+            echo "Set ALL three secrets (RELEASE_KEYSTORE_BASE64, STORE_PASSWORD, KEY_PASSWORD) or remove all three."
             exit 1
           else
-            echo "Release keystore secrets not configured; building Debug APK with debug.keystore.base64..."
-            if [ ! -s "debug.keystore.base64" ]; then
-              echo "Error: debug.keystore.base64 not found or empty in repository root!"
-              echo "Refusing to generate a random keystore because that breaks in-app updates (signature mismatch)."
-              echo "Commit debug.keystore.base64 to the repository root or configure RELEASE_KEYSTORE_BASE64 secrets."
-              exit 1
+            echo "Release keystore secrets not configured; preparing Debug APK keystore..."
+            if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+              echo "Decoding debug.keystore from DEBUG_KEYSTORE_BASE64 GitHub Secret..."
+              printf '%s' "$DEBUG_KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > debug.keystore
+            elif [ -s "debug.keystore.base64" ]; then
+              echo "Decoding debug.keystore from repository debug.keystore.base64..."
+              tr -d '\r\n ' < debug.keystore.base64 | base64 -d > debug.keystore
+            elif [ -s "debug.keystore" ]; then
+              echo "::warning::Using cached debug.keystore. Add DEBUG_KEYSTORE_BASE64 to GitHub Secrets for permanent consistent signing."
+            else
+              echo "::warning::debug.keystore.base64 not found and no cache available; generating debug.keystore (will be cached across runs). Add DEBUG_KEYSTORE_BASE64 to GitHub Secrets for permanent consistent signing."
+              keytool -genkeypair -noprompt \
+                -keystore debug.keystore \
+                -storepass android \
+                -alias androiddebugkey \
+                -keypass android \
+                -keyalg RSA -keysize 2048 -validity 10000 \
+                -dname "CN=Android Debug,O=Android,C=US"
             fi
-            tr -d '\r\n ' < debug.keystore.base64 | base64 -d > debug.keystore
+
             if [ ! -s "debug.keystore" ]; then
-              echo "Error: Failed to decode debug.keystore.base64!"
+              echo "Error: debug.keystore is missing or empty!"
               exit 1
             fi
-            echo "Decoded debug.keystore certificate info:"
+
+            echo "Active debug.keystore certificate info:"
             keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep -E "Alias name|Owner|Valid from|SHA256" || true
             $GRADLE_CMD :app:assembleDebug $GRADLE_CI_FLAGS
             APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
