@@ -266,11 +266,15 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     val bulanLaluCustomers = MutableStateFlow<List<com.example.data.model.CustomerEntity>>(emptyList())
     val akhirBulanCustomers = MutableStateFlow<List<com.example.data.model.CustomerEntity>>(emptyList())
     val dailyCustomers = MutableStateFlow<List<com.example.data.model.CustomerEntity>>(emptyList())
+    val lw325DailyCustomers = MutableStateFlow<List<com.example.data.model.CustomerEntity>>(emptyList())
 
     val lastSyncMetadata: StateFlow<com.example.data.model.SyncMetadataEntity?> =
         repository.observeLastSyncMetadata()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
     val isShowingCachedOfflineData = MutableStateFlow(false)
+    val isRefreshing = MutableStateFlow(false)
+    val errorMessage = MutableStateFlow<String?>(null)
+    private var syncJob: kotlinx.coroutines.Job? = null
     
     // Dashboard Period and Summaries (Decoupled from Monitoring and Kelolaan)
     val dashboardPeriodSource = MutableStateFlow("DAILY")
@@ -379,6 +383,9 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             "di319_url" -> di319Url.value = trimmed
             "lw325_daily_url" -> {
                 lw325DailyUrl.value = trimmed
+                if (trimmed.isNotBlank()) {
+                    loadLw325DailyCustomers(forceRefresh = true)
+                }
             }
             "link_database_url" -> {
                 linkDatabaseUrl.value = trimmed
@@ -618,6 +625,59 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun loadLw325DailyCustomers(forceRefresh: Boolean = false) {
+        viewModelScope.launch(Dispatchers.IO) {
+            fetchAndCacheLw325DailyCustomers(forceRefresh = forceRefresh)
+        }
+    }
+
+    private suspend fun fetchAndCacheLw325DailyCustomers(forceRefresh: Boolean = false) {
+        try {
+            val isOffline = isOfflineModeEnabled.value
+            val offlineContent = if (isOffline) getOfflineFileContent("lw325_daily_url") else null
+            val url = if (!isOffline) lw325DailyUrl.value else null
+            val offlineLw321 = if (isOffline) getOfflineFileContent("e_url_2") else null
+            val lw321Url = if (!isOffline) eUrl2.value.ifBlank { null } else null
+
+            if (!offlineContent.isNullOrBlank() || !url.isNullOrBlank()) {
+                if (!forceRefresh && lw325DailyCustomers.value.isNotEmpty()) return
+                val rawList = repository.getLw325DailyCustomers(
+                    url = url,
+                    offlineContent = offlineContent,
+                    lw321DatabaseUrl = lw321Url,
+                    offlineLw321Content = offlineLw321
+                )
+                val unique = rawList.distinctBy {
+                    when {
+                        it.noRekening.isNotBlank() -> it.noRekening.filter { c -> c.isDigit() }.ifBlank { it.noRekening }
+                        it.cif.isNotBlank() -> it.cif.filter { c -> c.isLetterOrDigit() }.ifBlank { it.cif }
+                        else -> "${it.namaNasabah}_${it.plafond}"
+                    }
+                }
+                if (unique.isNotEmpty()) {
+                    repository.savePeriodCustomers("PERIOD_LW325_DAILY", unique)
+                    lw325DailyCustomers.value = unique
+                    return
+                }
+            }
+
+            if (lw325DailyCustomers.value.isEmpty()) {
+                val cached = repository.getCachedPeriodCustomers("PERIOD_LW325_DAILY")
+                if (cached.isNotEmpty()) {
+                    lw325DailyCustomers.value = cached.map { it.copy(menuType = "EKSTRAKOMP") }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("CustomerViewModel", "Failed to load LW325 Daily customers", e)
+            if (lw325DailyCustomers.value.isEmpty()) {
+                val cached = repository.getCachedPeriodCustomers("PERIOD_LW325_DAILY")
+                if (cached.isNotEmpty()) {
+                    lw325DailyCustomers.value = cached.map { it.copy(menuType = "EKSTRAKOMP") }
+                }
+            }
+        }
+    }
+
     fun loadDashboardMonthlyData(m: Int) {
         if (dashboardMonthlySummary.value.containsKey(m)) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -747,6 +807,11 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                         kolekSummaryAkhirBulan.value = calculateKolekSummary(cachedAkhirBln)
                         mantriSummaryAkhirBulan.value = calculateMantriSummaries(cachedAkhirBln)
                     }
+                }
+
+                val cachedLw325Daily = repository.getCachedPeriodCustomers("PERIOD_LW325_DAILY")
+                if (cachedLw325Daily.isNotEmpty() && lw325DailyCustomers.value.isEmpty()) {
+                    lw325DailyCustomers.value = cachedLw325Daily.map { it.copy(menuType = "EKSTRAKOMP") }
                 }
             } catch (e: Exception) {
                 android.util.Log.e("CustomerViewModel", "Error loading Room cached datasets", e)
@@ -1732,73 +1797,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
-    init {
-        loadTindakLanjutMap()
-        loadLocalCachedData()
-        loadDailyDataForFilter()
-        viewModelScope.launch {
-            repository.getDi319Flow().collect { cachedRows ->
-                if (cachedRows.isNotEmpty()) {
-                    di319Rows.value = cachedRows
-                }
-            }
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            val totalCustomers = repository.getTotalCustomersCount()
-            val networkOk = repository.isNetworkAvailable(getApplication())
-            if (totalCustomers == 0) {
-                if (networkOk) {
-                    val curMenu = selectedMenu.value
-                    val fetchMenu = if (curMenu == "KELOLAAN" || curMenu == "KUNJUNGAN") "INTRAKOMP" else curMenu
-                    if (fetchMenu != "SIMPANAN") {
-                        refreshSpreadsheetData()
-                    }
-                } else {
-                    repository.seedMockIfEmpty("INTRAKOMP")
-                    repository.seedMockIfEmpty("EKSTRAKOMP")
-                    isShowingCachedOfflineData.value = true
-                    errorMessage.value = "Tidak ada koneksi internet dan belum ada data tersimpan."
-                }
-            } else if (!networkOk && !isOfflineModeEnabled.value) {
-                isShowingCachedOfflineData.value = true
-            }
-            if (networkOk && periodDateDaily.value.isBlank() && periodDateAkhirBulan.value.isBlank()) {
-                fetchPeriodDates()
-            }
-        }
-        viewModelScope.launch {
-            combine(activeVisitDateStr, kunjunganKeys) { date, keys -> date to keys }
-                .collect { (date, keys) ->
-                    if (!isPastDate(date) && keys.isNotEmpty()) {
-                        val history = (sharedPrefs.getStringSet("kunjungan_history_$date", emptySet()) ?: emptySet()).toMutableSet()
-                        if (history.addAll(keys)) {
-                            sharedPrefs.edit().putStringSet("kunjungan_history_$date", history).apply()
-                        }
-                    }
-                }
-        }
-        viewModelScope.launch {
-            combine(filterBulanLunas, selectedMenu, repository.getCustomersFlow("INTRAKOMP")) { date, menu, intra ->
-                Triple(date, menu, intra)
-            }.collect { (date, menu, intra) ->
-                if (menu == "KUNJUNGAN" && date != "SEMUA" && date.isNotBlank() && intra.isNotEmpty()) {
-                    generateKunjunganIfEmpty(date)
-                }
-            }
-        }
-        viewModelScope.launch {
-            combine(filtersFlow, selectedMenu) { filters, menu -> filters to menu }
-                .collect { (filters, menu) ->
-                    if (!isSwitchingMenu) {
-                        menuFilterCache[menu] = filters
-                        saveMenuFiltersToPrefs(menu, filters)
-                    }
-                }
-        }
-    }
-
-    val isRefreshing = MutableStateFlow(false)
-    val errorMessage = MutableStateFlow<String?>(null)
+    // Initialized in consolidated init block below after all properties are ready
 
     fun cleanMantriNameOnly(raw: String): String {
         if (raw.isBlank() || raw.equals("SEMUA", ignoreCase = true)) return raw
@@ -2892,7 +2891,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
-        // Set default URLs if empty
+        // Set default URLs if empty before triggering data refresh/load
         if (url1.value.isBlank() || url1.value.contains("1aGEOYQv1bLzzlYVd")) {
             saveLink("url_1", "https://docs.google.com/spreadsheets/d/1Uil_mrHwe-Yz7e1cHBthZNrkl99AyLsu/edit?usp=drive_link&ouid=112982864281396524406&rtpof=true&sd=true")
         }
@@ -2918,6 +2917,69 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         }
         if (di319Url.value.isBlank()) {
             saveLink("di319_url", "https://docs.google.com/spreadsheets/d/1MjEhFYv6SZc-8lY0q5ODNiSqmwtzZD3b/edit?usp=drive_link&ouid=112982864281396524406&rtpof=true&sd=true")
+        }
+
+        loadTindakLanjutMap()
+        loadLocalCachedData()
+        loadDailyDataForFilter()
+        viewModelScope.launch {
+            repository.getDi319Flow().collect { cachedRows ->
+                if (cachedRows.isNotEmpty()) {
+                    di319Rows.value = cachedRows
+                }
+            }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val totalCustomers = repository.getTotalCustomersCount()
+            val networkOk = repository.isNetworkAvailable(getApplication())
+            if (totalCustomers == 0) {
+                if (networkOk) {
+                    val curMenu = selectedMenu.value
+                    val fetchMenu = if (curMenu == "KELOLAAN" || curMenu == "KUNJUNGAN") "INTRAKOMP" else curMenu
+                    if (fetchMenu != "SIMPANAN") {
+                        refreshSpreadsheetData()
+                    }
+                } else {
+                    repository.seedMockIfEmpty("INTRAKOMP")
+                    repository.seedMockIfEmpty("EKSTRAKOMP")
+                    isShowingCachedOfflineData.value = true
+                    errorMessage.value = "Tidak ada koneksi internet dan belum ada data tersimpan."
+                }
+            } else if (!networkOk && !isOfflineModeEnabled.value) {
+                isShowingCachedOfflineData.value = true
+            }
+            if (networkOk && periodDateDaily.value.isBlank() && periodDateAkhirBulan.value.isBlank()) {
+                fetchPeriodDates()
+            }
+        }
+        viewModelScope.launch {
+            combine(activeVisitDateStr, kunjunganKeys) { date, keys -> date to keys }
+                .collect { (date, keys) ->
+                    if (!isPastDate(date) && keys.isNotEmpty()) {
+                        val history = (sharedPrefs.getStringSet("kunjungan_history_$date", emptySet()) ?: emptySet()).toMutableSet()
+                        if (history.addAll(keys)) {
+                            sharedPrefs.edit().putStringSet("kunjungan_history_$date", history).apply()
+                        }
+                    }
+                }
+        }
+        viewModelScope.launch {
+            combine(filterBulanLunas, selectedMenu, repository.getCustomersFlow("INTRAKOMP")) { date, menu, intra ->
+                Triple(date, menu, intra)
+            }.collect { (date, menu, intra) ->
+                if (menu == "KUNJUNGAN" && date != "SEMUA" && date.isNotBlank() && intra.isNotEmpty()) {
+                    generateKunjunganIfEmpty(date)
+                }
+            }
+        }
+        viewModelScope.launch {
+            combine(filtersFlow, selectedMenu) { filters, menu -> filters to menu }
+                .collect { (filters, menu) ->
+                    if (!isSwitchingMenu) {
+                        menuFilterCache[menu] = filters
+                        saveMenuFiltersToPrefs(menu, filters)
+                    }
+                }
         }
 
         viewModelScope.launch {
@@ -3101,7 +3163,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private var syncJob: kotlinx.coroutines.Job? = null
+    // syncJob declared at top of class before init
 
     /**
      * Trigger fresh data download from Google Sheets
@@ -3446,6 +3508,8 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 } catch (e: Exception) {
                     android.util.Log.e("CustomerViewModel", "Failed to load daily summary", e)
                 }
+
+                fetchAndCacheLw325DailyCustomers(forceRefresh = true)
             } catch (e: Exception) {
                 android.util.Log.e("CustomerViewModel", "Failed to load daily mapping", e)
             }

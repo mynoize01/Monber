@@ -894,61 +894,85 @@ object SpreadsheetService {
     }
 
     /**
+     * Fetch LW325 Daily spreadsheet as parsed CustomerEntity list (including Tgl PH in extraColumns).
+     */
+    fun fetchLw325DailyCustomers(
+        url: String?,
+        offlineContent: String? = null,
+        lw321DatabaseUrl: String? = null,
+        offlineLw321Content: String? = null
+    ): List<CustomerEntity> {
+        if (offlineContent.isNullOrBlank() && url.isNullOrBlank()) return emptyList()
+        return try {
+            val bodyString = if (!offlineContent.isNullOrBlank()) {
+                offlineContent
+            } else {
+                downloadSpreadsheetCsv(url!!)
+            }
+            if (!isValidCsvContent(bodyString)) return emptyList()
+
+            val lw321Map = if (!lw321DatabaseUrl.isNullOrBlank() || !offlineLw321Content.isNullOrBlank()) {
+                try {
+                    fetchKelolaanDatabase(lw321DatabaseUrl, offlineLw321Content, isRekKey = true)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to load lw321Database for lw325Daily", e)
+                    emptyMap()
+                }
+            } else {
+                emptyMap()
+            }
+
+            parseSpreadsheetCsv(bodyString, "EKSTRAKOMP", emptyMap(), lw321Map, emptyMap(), emptyMap())
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching LW325 Daily customers", e)
+            emptyList()
+        }
+    }
+
+    /**
      * Fetch LW325 Daily spreadsheet as a map of CIF/NoRekening to OS Pinjaman (Update Pokok).
      */
     fun fetchLw325DailyInfo(
         url: String?,
         offlineContent: String? = null
     ): Map<String, Double> {
-        if (offlineContent.isNullOrBlank() && url.isNullOrBlank()) return emptyMap()
-        try {
-            val bodyString = if (!offlineContent.isNullOrBlank()) {
-                offlineContent
-            } else {
-                downloadSpreadsheetCsv(url!!)
-            }
-            if (bodyString.isBlank()) return emptyMap()
-
-            val list = parseSpreadsheetCsv(bodyString, "EKSTRAKOMP", emptyMap(), emptyMap(), emptyMap(), emptyMap())
-            val resultMap = mutableMapOf<String, Double>()
-            list.forEach { item ->
-                // Update Pokok ambil dari link LW325 Daily (Sisa pokok + Alih Tagih)
-                val totalDailyVal = item.osPinjaman + item.pinalty
-                val rek = item.noRekening.trim()
-                if (rek.isNotBlank()) {
-                    resultMap[rek] = totalDailyVal
-                    val formatted15 = formatRekening15(rek)
-                    resultMap[formatted15] = totalDailyVal
-                    val cleanRek = rek.filter { it.isDigit() }
-                    if (cleanRek.isNotBlank()) {
-                        resultMap[cleanRek] = totalDailyVal
-                        val noZeroRek = cleanRek.trimStart('0')
-                        if (noZeroRek.isNotBlank()) {
-                            resultMap[noZeroRek] = totalDailyVal
-                        }
-                        if (cleanRek.length >= 15) {
-                            resultMap[cleanRek.takeLast(15)] = totalDailyVal
-                        }
+        val list = fetchLw325DailyCustomers(url, offlineContent)
+        if (list.isEmpty()) return emptyMap()
+        val resultMap = mutableMapOf<String, Double>()
+        list.forEach { item ->
+            // Update Pokok ambil dari link LW325 Daily (Sisa pokok + Alih Tagih)
+            val totalDailyVal = item.osPinjaman + item.pinalty
+            val rek = item.noRekening.trim()
+            if (rek.isNotBlank()) {
+                resultMap[rek] = totalDailyVal
+                val formatted15 = formatRekening15(rek)
+                resultMap[formatted15] = totalDailyVal
+                val cleanRek = rek.filter { it.isDigit() }
+                if (cleanRek.isNotBlank()) {
+                    resultMap[cleanRek] = totalDailyVal
+                    val noZeroRek = cleanRek.trimStart('0')
+                    if (noZeroRek.isNotBlank()) {
+                        resultMap[noZeroRek] = totalDailyVal
+                    }
+                    if (cleanRek.length >= 15) {
+                        resultMap[cleanRek.takeLast(15)] = totalDailyVal
                     }
                 }
-                val cif = item.cif.trim()
-                if (cif.isNotBlank()) {
-                    resultMap[cif] = totalDailyVal
-                    resultMap["CIF-$cif"] = totalDailyVal
-                    val cleanCif = cif.filter { it.isLetterOrDigit() }.dropWhile { it == '0' }
-                    if (cleanCif.isNotBlank()) {
-                        resultMap[cleanCif] = totalDailyVal
-                    }
-                }
-                if (item.namaNasabah.isNotBlank()) {
-                    resultMap["NAME_${item.namaNasabah.trim().lowercase()}"] = totalDailyVal
+            }
+            val cif = item.cif.trim()
+            if (cif.isNotBlank()) {
+                resultMap[cif] = totalDailyVal
+                resultMap["CIF-$cif"] = totalDailyVal
+                val cleanCif = cif.filter { it.isLetterOrDigit() }.dropWhile { it == '0' }
+                if (cleanCif.isNotBlank()) {
+                    resultMap[cleanCif] = totalDailyVal
                 }
             }
-            return resultMap
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching LW325 Daily info", e)
-            return emptyMap()
+            if (item.namaNasabah.isNotBlank()) {
+                resultMap["NAME_${item.namaNasabah.trim().lowercase()}"] = totalDailyVal
+            }
         }
+        return resultMap
     }
 
     private fun parseCustomFormulaDouble(raw: String): Double {
@@ -1119,6 +1143,7 @@ object SpreadsheetService {
         var segmenIdx = -1
         var periodeIdx = -1
         var nextPmtDateIdx = -1
+        var tglPhIdx = -1
         var pnIdx = -1
 
         if (headerIndex != -1) {
@@ -1265,6 +1290,9 @@ object SpreadsheetService {
                     }
                     if (tglRealIdx == -1 && (norm.contains("tgldh") || norm.contains("tglreal") || norm.contains("realisasi"))) {
                         tglRealIdx = idx
+                    }
+                    if (tglPhIdx == -1 && (norm.contains("tglph") || norm.contains("tanggalph") || norm.contains("tglhapus") || norm.contains("tanggalhapus") || norm == "phdate")) {
+                        tglPhIdx = idx
                     }
                 }
             } else {
@@ -1539,7 +1567,7 @@ object SpreadsheetService {
             parts.add("isKelolaan::true")
             parts.add("NPD_FULL::${nextPmtDateStr.trim()}")
             if (menuType == "EKSTRAKOMP") {
-                val idxN = if (isBCMerged) 12 else 13
+                val idxN = if (tglPhIdx != -1) tglPhIdx else (if (isBCMerged) 12 else 13)
                 val tglPhValue = if (idxN < originalCols.size) originalCols[idxN].trim() else ""
                 if (tglPhValue.isNotBlank()) {
                     parts.add("Tgl PH::$tglPhValue")

@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -107,6 +108,7 @@ fun DashboardUnitView(
     val bulanLaluCustomers by viewModel.bulanLaluCustomers.collectAsState()
     val akhirBulanCustomers by viewModel.akhirBulanCustomers.collectAsState()
     val dailyCustomers by viewModel.dailyCustomers.collectAsState()
+    val lw325DailyCustomers by viewModel.lw325DailyCustomers.collectAsState()
     val priorMonthLw321KolekMap by viewModel.priorMonthLw321KolekMap.collectAsState()
 
     // State untuk Popup Tabel Nasabah
@@ -143,6 +145,9 @@ fun DashboardUnitView(
         }
         if (summaryBlnLalu.debtors == 0 || bulanLaluCustomers.isEmpty()) {
             viewModel.loadSummaryForPeriod("BULAN_LALU")
+        }
+        if (lw325DailyCustomers.isEmpty()) {
+            viewModel.loadLw325DailyCustomers()
         }
     }
 
@@ -438,17 +443,19 @@ fun DashboardUnitView(
         val downgradeMap: Map<String, List<CustomerEntity>>,
         val upgradeMap: Map<String, List<CustomerEntity>>,
         val lunasList: List<CustomerEntity>,
-        val dhList: List<CustomerEntity>,
+        val nplLunasList: List<CustomerEntity>,
         val tunggakanKurang6BlnList: List<CustomerEntity> = emptyList(),
-        val tukcilList: List<CustomerEntity> = emptyList()
+        val tukcilList: List<CustomerEntity> = emptyList(),
+        val dhNewList: List<CustomerEntity> = emptyList()
     )
 
     val transitionResult by produceState(
-        initialValue = TransitionGroupResult(emptyMap(), emptyMap(), emptyList(), emptyList(), emptyList(), emptyList()),
+        initialValue = TransitionGroupResult(emptyMap(), emptyMap(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList()),
         dashboardPeriodSource,
         bulanLaluCustomers,
         akhirBulanCustomers,
         dailyCustomers,
+        lw325DailyCustomers,
         currentCustomers,
         dailyDataMap,
         priorMonthLw321KolekMap,
@@ -458,7 +465,7 @@ fun DashboardUnitView(
         val downgradeMap = mutableMapOf<String, MutableList<CustomerEntity>>()
         val upgradeMap = mutableMapOf<String, MutableList<CustomerEntity>>()
         val lunasList = mutableListOf<CustomerEntity>()
-        val dhList = mutableListOf<CustomerEntity>()
+        val nplLunasList = mutableListOf<CustomerEntity>()
 
         val cleanSel = if (filterMantri != "SEMUA") cleanMantriNameOnly(filterMantri) else ""
 
@@ -534,10 +541,9 @@ fun DashboardUnitView(
                             (cr.isNotBlank() && dailyRekSet.contains(cr)) ||
                             (cc.isNotBlank() && dailyRekSet.contains(cc))
                     if (!exists) {
-                        val (_, rank) = parseKolekCodeAndRank(cust.kolek)
                         val custWithBln = cust.copy(kolekBlnLalu = cust.kolek)
-                        if (rank == 7) {
-                            dhList.add(custWithBln)
+                        if (isNplKolek(cust.kolek)) {
+                            nplLunasList.add(custWithBln)
                         } else {
                             lunasList.add(custWithBln)
                         }
@@ -665,10 +671,9 @@ fun DashboardUnitView(
                         (cc.isNotBlank() && akhirRekSet.contains(cc)) ||
                         (cc.isNotBlank() && akhirRekSet.contains("CIF-$cc"))
                 if (!exists && currAkhir.isNotEmpty()) {
-                    val (_, rank) = parseKolekCodeAndRank(bCust.kolek)
                     val bCustWithBln = bCust.copy(kolekBlnLalu = bCust.kolek)
-                    if (rank == 7) {
-                        dhList.add(bCustWithBln)
+                    if (isNplKolek(bCust.kolek)) {
+                        nplLunasList.add(bCustWithBln)
                     } else {
                         lunasList.add(bCustWithBln)
                     }
@@ -720,16 +725,23 @@ fun DashboardUnitView(
             effectiveTunggakan in 0.01..100000.0
         }
 
-        TransitionGroupResult(downgradeMap, upgradeMap, lunasList, dhList, tunggakanKurang6BlnList, tukcilList)
+        val currentYearMonth = java.time.YearMonth.now()
+        val dhNewList = filterByMantri(lw325DailyCustomers).filter { cust ->
+            val tglPh = extractTglPhFromExtraColumns(cust.extraColumns)
+            isDateInYearMonth(tglPh, currentYearMonth)
+        }
+
+        TransitionGroupResult(downgradeMap, upgradeMap, lunasList, nplLunasList, tunggakanKurang6BlnList, tukcilList, dhNewList)
         }
     }
 
     val downgradeData = transitionResult.downgradeMap
     val upgradeData = transitionResult.upgradeMap
     val lunasData = transitionResult.lunasList
-    val dhData = transitionResult.dhList
+    val nplLunasData = transitionResult.nplLunasList
     val tunggakanKurang6BlnData = transitionResult.tunggakanKurang6BlnList
     val tukcilData = transitionResult.tukcilList
+    val dhNewData = transitionResult.dhNewList
 
     val totalDowngradeOs = remember(downgradeData) {
         downgradeData.values.flatten().sumOf { it.osPinjaman }
@@ -1186,7 +1198,7 @@ fun DashboardUnitView(
                                 sorted
                             }
 
-                            if (activeDowngrades.isEmpty() && lunasData.isEmpty() && dhData.isEmpty() && tunggakanKurang6BlnData.isEmpty()) {
+                            if (activeDowngrades.isEmpty() && lunasData.isEmpty() && nplLunasData.isEmpty() && tunggakanKurang6BlnData.isEmpty() && tukcilData.isEmpty() && dhNewData.isEmpty()) {
                                 Text(
                                     text = "Tidak ada pemburukan kolek pada periode ini",
                                     style = MaterialTheme.typography.bodySmall,
@@ -1221,7 +1233,7 @@ fun DashboardUnitView(
                                     }
                                 }
 
-                                if (lunasData.isNotEmpty() || dhData.isNotEmpty() || tunggakanKurang6BlnData.isNotEmpty() || tukcilData.isNotEmpty()) {
+                                if (lunasData.isNotEmpty() || nplLunasData.isNotEmpty() || tunggakanKurang6BlnData.isNotEmpty() || tukcilData.isNotEmpty() || dhNewData.isNotEmpty()) {
                                     Spacer(modifier = Modifier.height(2.dp))
                                     HorizontalDivider(color = Color(0xFFFFCDD2), thickness = 0.8.dp)
                                     Text(
@@ -1240,7 +1252,9 @@ fun DashboardUnitView(
                                             accentColor = Color(0xFF00796B),
                                             bgColor = Color(0xFFE0F2F1),
                                             formatter = formatter,
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("card_nasabah_lunas"),
                                             onClick = {
                                                 popupDialogTitle = "Daftar Nasabah Lunas (${lunasData.size} Deb)"
                                                 popupDialogCustomers = lunasData
@@ -1248,16 +1262,18 @@ fun DashboardUnitView(
                                             }
                                         )
                                         KolekDetailMiniCard(
-                                            title = "Nasabah DH (Macet)",
-                                            osValue = dhData.sumOf { it.osPinjaman },
-                                            debtorCount = dhData.size,
+                                            title = "Nasabah NPL Lunas",
+                                            osValue = nplLunasData.sumOf { it.osPinjaman },
+                                            debtorCount = nplLunasData.size,
                                             accentColor = Color(0xFF6A1B9A),
                                             bgColor = Color(0xFFF3E5F5),
                                             formatter = formatter,
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("card_nasabah_npl_lunas"),
                                             onClick = {
-                                                popupDialogTitle = "Daftar Nasabah DH / Hapus Buku (${dhData.size} Deb)"
-                                                popupDialogCustomers = dhData
+                                                popupDialogTitle = "Daftar Nasabah NPL Lunas (${nplLunasData.size} Deb)"
+                                                popupDialogCustomers = nplLunasData
                                                 showCustomerPopup = true
                                             }
                                         )
@@ -1268,7 +1284,9 @@ fun DashboardUnitView(
                                             accentColor = Color(0xFFE65100),
                                             bgColor = Color(0xFFFFF3E0),
                                             formatter = formatter,
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("card_tunggakan_kurang_6bln"),
                                             onClick = {
                                                 popupDialogTitle = "Daftar Tunggakan < 6 Bulan (${tunggakanKurang6BlnData.size} Deb)"
                                                 popupDialogCustomers = tunggakanKurang6BlnData
@@ -1289,14 +1307,31 @@ fun DashboardUnitView(
                                             accentColor = Color(0xFF0288D1),
                                             bgColor = Color(0xFFE1F5FE),
                                             formatter = formatter,
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("card_tukcil"),
                                             onClick = {
                                                 popupDialogTitle = "Daftar Nasabah Tukcil <100 rb (${tukcilData.size} Deb)"
                                                 popupDialogCustomers = tukcilData
                                                 showCustomerPopup = true
                                             }
                                         )
-                                        Spacer(modifier = Modifier.weight(1f))
+                                        KolekDetailMiniCard(
+                                            title = "Nasabah DH New",
+                                            osValue = dhNewData.sumOf { it.osPinjaman },
+                                            debtorCount = dhNewData.size,
+                                            accentColor = Color(0xFFB71C1C),
+                                            bgColor = Color(0xFFFFEBEE),
+                                            formatter = formatter,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("card_nasabah_dh_new"),
+                                            onClick = {
+                                                popupDialogTitle = "Daftar Nasabah DH New (${dhNewData.size} Deb)"
+                                                popupDialogCustomers = dhNewData
+                                                showCustomerPopup = true
+                                            }
+                                        )
                                         Spacer(modifier = Modifier.weight(1f))
                                     }
                                 }
@@ -1865,16 +1900,23 @@ fun extractMonthAndYear(dateStr: String): Pair<String, String> {
             val m = parts[1].padStart(2, '0')
             return m to y
         } else {
-            val m = parts[1].padStart(2, '0')
+            val p0 = parts[0].toIntOrNull()
+            val p1 = parts[1].toIntOrNull()
+            val mNum = if (p0 != null && p1 != null && p1 > 12 && p0 in 1..12) p0 else p1
+            val m = (mNum?.toString() ?: parts[1]).padStart(2, '0')
             var y = parts[2]
             if (y.length == 2) y = "20$y"
             return m to y
         }
     } else if (parts.size == 2) {
-        val m = parts[0].padStart(2, '0')
-        var y = parts[1]
-        if (y.length == 2) y = "20$y"
-        return m to y
+        if (parts[0].length == 4) {
+            return parts[1].padStart(2, '0') to parts[0]
+        } else {
+            val m = parts[0].padStart(2, '0')
+            var y = parts[1]
+            if (y.length == 2) y = "20$y"
+            return m to y
+        }
     }
 
     // 3. Compact numeric format (yyyyMMdd or ddMMyyyy)
@@ -1916,6 +1958,32 @@ fun parseKolekCodeAndRank(k: String): Pair<String, Int> {
         s == "M" || s == "5" || s == "MACET" || s.contains("MACET") -> "M" to 7
         else -> "" to 99
     }
+}
+
+fun isNplKolek(kolek: String): Boolean {
+    val (_, rank) = parseKolekCodeAndRank(kolek)
+    return rank in 5..7 || kolek.trim().uppercase().contains("NPL")
+}
+
+fun extractTglPhFromExtraColumns(extraColumns: String): String {
+    if (extraColumns.isBlank()) return ""
+    return extraColumns.split("||")
+        .firstOrNull { it.startsWith("Tgl PH::") }
+        ?.substringAfter("Tgl PH::")
+        ?.trim()
+        ?: ""
+}
+
+fun isDateInYearMonth(
+    dateStr: String,
+    targetMonth: java.time.YearMonth = java.time.YearMonth.now()
+): Boolean {
+    val clean = dateStr.trim()
+    if (clean.isBlank() || clean == "-") return false
+    val (mStr, yStr) = extractMonthAndYear(clean)
+    val month = mStr.toIntOrNull() ?: return false
+    val year = yStr.toIntOrNull() ?: return false
+    return month == targetMonth.monthValue && year == targetMonth.year
 }
 
 @Composable

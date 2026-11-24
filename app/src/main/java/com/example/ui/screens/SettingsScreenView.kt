@@ -301,7 +301,7 @@ fun SettingsScreenView(
                         color = Color(0xFF00386B)
                     )
                     Text(
-                        text = "Mode offline & pengaturan teks pesan WA",
+                        text = "Mode offline, teks pesan WA & cek update",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF535F70)
                     )
@@ -1073,110 +1073,6 @@ fun SettingsScreenView(
             }
         }
 
-        // 6. Tombol Check for Update (Berdiri Sendiri di Bawah Tombol Refresh tanpa Kotak Background)
-        val isUpdateBusy = appUpdateState is AppUpdateState.Checking ||
-            appUpdateState is AppUpdateState.Downloading ||
-            appUpdateState is AppUpdateState.Installing
-        Button(
-            onClick = {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                    !AppUpdateManager.hasNotificationPermission(context)
-                ) {
-                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
-                when (val state = appUpdateState) {
-                    is AppUpdateState.NeedsInstallPermission -> {
-                        installPermissionLauncher.launch(
-                            AppUpdateManager.createInstallPermissionIntent(context)
-                        )
-                    }
-                    is AppUpdateState.ReadyToInstall -> {
-                        if (AppUpdateManager.canRequestPackageInstalls(context)) {
-                            viewModel.retryInstallAfterPermissionGranted()
-                        } else {
-                            installPermissionLauncher.launch(
-                                AppUpdateManager.createInstallPermissionIntent(context)
-                            )
-                        }
-                    }
-                    else -> {
-                        hasManualUpdateCheck = true
-                        viewModel.checkForUpdates(
-                            autoInstallOnFind = true,
-                            isAutoBackgroundCheck = false
-                        )
-                    }
-                }
-            },
-            enabled = !isUpdateBusy,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFF005FAF),
-                disabledContainerColor = Color(0xFF005FAF).copy(alpha = 0.7f)
-            ),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(44.dp)
-                .testTag("check_for_update_button")
-        ) {
-            when (val state = appUpdateState) {
-                is AppUpdateState.Checking -> {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color = Color.White,
-                        strokeWidth = 2.dp
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Memeriksa Pembaruan...", fontWeight = FontWeight.Bold)
-                }
-                is AppUpdateState.Downloading -> {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color = Color.White,
-                        strokeWidth = 2.dp
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Mengunduh ${state.progressPercent}%...", fontWeight = FontWeight.Bold)
-                }
-                is AppUpdateState.Installing -> {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color = Color.White,
-                        strokeWidth = 2.dp
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Menyiapkan Instalasi...", fontWeight = FontWeight.Bold)
-                }
-                is AppUpdateState.NeedsInstallPermission -> {
-                    Icon(
-                        imageVector = Icons.Default.SystemUpdate,
-                        contentDescription = "Izinkan Instalasi",
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Izinkan & Instal Update", fontWeight = FontWeight.Bold)
-                }
-                is AppUpdateState.ReadyToInstall -> {
-                    Icon(
-                        imageVector = Icons.Default.SystemUpdate,
-                        contentDescription = "Instal Pembaruan",
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Instal Update (${state.release.tagName})", fontWeight = FontWeight.Bold)
-                }
-                else -> {
-                    Icon(
-                        imageVector = Icons.Default.SystemUpdate,
-                        contentDescription = "Check for Update",
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Check for Update", fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
         // Branding & App Build (Terpisah Mandiri di Luar Kolom Kotak Akses PN)
         Column(
             modifier = Modifier
@@ -1369,7 +1265,7 @@ fun SettingsScreenView(
                                     color = Color(0xFF00386B)
                                 )
                                 Text(
-                                    text = "Mode Offline & Pengaturan Teks WA",
+                                    text = "Mode Offline, Teks WA & Update Aplikasi",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Color(0xFF64748B)
                                 )
@@ -1567,6 +1463,110 @@ fun SettingsScreenView(
                                         modifier = Modifier.size(22.dp),
                                         tint = Color(0xFF005FAF)
                                     )
+                                }
+                            }
+                        }
+
+                        // 3. Check for Update (di bawah Pengaturan Edit Teks WA)
+                        val isUpdateBusy = appUpdateState is AppUpdateState.Checking ||
+                            appUpdateState is AppUpdateState.Downloading ||
+                            appUpdateState is AppUpdateState.Installing
+                        Button(
+                            onClick = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                    !AppUpdateManager.hasNotificationPermission(context)
+                                ) {
+                                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                                when (appUpdateState) {
+                                    is AppUpdateState.NeedsInstallPermission -> {
+                                        installPermissionLauncher.launch(
+                                            AppUpdateManager.createInstallPermissionIntent(context)
+                                        )
+                                    }
+                                    is AppUpdateState.ReadyToInstall -> {
+                                        if (AppUpdateManager.canRequestPackageInstalls(context)) {
+                                            viewModel.retryInstallAfterPermissionGranted()
+                                        } else {
+                                            installPermissionLauncher.launch(
+                                                AppUpdateManager.createInstallPermissionIntent(context)
+                                            )
+                                        }
+                                    }
+                                    else -> {
+                                        hasManualUpdateCheck = true
+                                        viewModel.checkForUpdates(
+                                            autoInstallOnFind = true,
+                                            isAutoBackgroundCheck = false
+                                        )
+                                    }
+                                }
+                            },
+                            enabled = !isUpdateBusy,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF005FAF),
+                                disabledContainerColor = Color(0xFF005FAF).copy(alpha = 0.7f)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .testTag("check_for_update_button")
+                        ) {
+                            when (val state = appUpdateState) {
+                                is AppUpdateState.Checking -> {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Memeriksa Pembaruan...", fontWeight = FontWeight.Bold)
+                                }
+                                is AppUpdateState.Downloading -> {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Mengunduh ${state.progressPercent}%...", fontWeight = FontWeight.Bold)
+                                }
+                                is AppUpdateState.Installing -> {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Menyiapkan Instalasi...", fontWeight = FontWeight.Bold)
+                                }
+                                is AppUpdateState.NeedsInstallPermission -> {
+                                    Icon(
+                                        imageVector = Icons.Default.SystemUpdate,
+                                        contentDescription = "Izinkan Instalasi",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Izinkan & Instal Update", fontWeight = FontWeight.Bold)
+                                }
+                                is AppUpdateState.ReadyToInstall -> {
+                                    Icon(
+                                        imageVector = Icons.Default.SystemUpdate,
+                                        contentDescription = "Instal Pembaruan",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Instal Update (${state.release.tagName})", fontWeight = FontWeight.Bold)
+                                }
+                                else -> {
+                                    Icon(
+                                        imageVector = Icons.Default.SystemUpdate,
+                                        contentDescription = "Check for Update",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Check for Update", fontWeight = FontWeight.Bold)
                                 }
                             }
                         }

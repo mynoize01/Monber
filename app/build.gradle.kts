@@ -14,8 +14,8 @@ android {
     applicationId = "com.aistudio.tablenavigator.htfovt"
     minSdk = 24
     targetSdk = 36
-    versionCode = 9
-    versionName = "1.4.8"
+    versionCode = 10
+    versionName = "1.4.9"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

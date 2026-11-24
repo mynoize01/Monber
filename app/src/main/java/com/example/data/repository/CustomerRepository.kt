@@ -246,4 +246,25 @@ class CustomerRepository(
             emptyMap()
         }
     }
+
+    /**
+     * Get LW325 Daily parsed customers list (for Dashboard Nasabah DH New).
+     */
+    suspend fun getLw325DailyCustomers(
+        url: String?,
+        offlineContent: String? = null,
+        lw321DatabaseUrl: String? = null,
+        offlineLw321Content: String? = null
+    ): List<CustomerEntity> = withContext(Dispatchers.IO) {
+        try {
+            SpreadsheetService.fetchLw325DailyCustomers(
+                url = url,
+                offlineContent = offlineContent,
+                lw321DatabaseUrl = lw321DatabaseUrl,
+                offlineLw321Content = offlineLw321Content
+            )
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
 }

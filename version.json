@@ -1,10 +1,10 @@
 {
-  "versionCode": 9,
-  "versionName": "1.4.8",
-  "tagName": "v1.4.8",
-  "releaseName": "MonBer v1.4.8",
-  "releaseNotes": "Nama aplikasi diperbarui menjadi MonBer, tampilan pill No Rek & OS pencarian global lebih ringkas tanpa Rp, kartu Input Link terpisah, popup Pengaturan Aplikasi (Mode Offline & Edit Teks WA) via ikon gear, serta gabungan Kalkulator Pinjaman (Anuitas) & Kalkulator Selisih Bulan.",
-  "apkUrl": "https://github.com/mynoize01/Monber/releases/download/v1.4.8/MonBer-v1.4.8.apk",
-  "htmlUrl": "https://github.com/mynoize01/Monber/releases/tag/v1.4.8",
+  "versionCode": 10,
+  "versionName": "1.4.9",
+  "tagName": "v1.4.9",
+  "releaseName": "MonBer v1.4.9",
+  "releaseNotes": "Penambahan kartu Nasabah DH New (LW325 Daily bulan PH berjalan), pembaruan kartu Nasabah NPL Lunas (seluruh NPL yang lunas), serta pemindahan tombol Check for Update ke dalam popup Pengaturan Aplikasi.",
+  "apkUrl": "https://github.com/mynoize01/Monber/releases/download/v1.4.9/MonBer-v1.4.9.apk",
+  "htmlUrl": "https://github.com/mynoize01/Monber/releases/tag/v1.4.9",
   "apkSizeBytes": 0
 }
