@@ -52,6 +52,10 @@ sealed class AppUpdateState {
         val downloadedMb: Float,
         val totalMb: Float
     ) : AppUpdateState()
+    data class Installing(
+        val release: GitHubReleaseInfo,
+        val apkFile: File
+    ) : AppUpdateState()
     data class ReadyToInstall(
         val release: GitHubReleaseInfo,
         val apkFile: File
@@ -584,8 +588,18 @@ object AppUpdateManager {
                 PackageInstaller.SessionParams.MODE_FULL_INSTALL
             ).apply {
                 setAppPackageName(context.packageName)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    setInstallReason(PackageManager.INSTALL_REASON_USER)
+                }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+                    setInstallScenario(PackageManager.INSTALL_SCENARIO_FAST)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    setPackageSource(PackageInstaller.PACKAGE_SOURCE_DOWNLOADED_FILE)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    setRequestUpdateOwnership(true)
                 }
             }
 

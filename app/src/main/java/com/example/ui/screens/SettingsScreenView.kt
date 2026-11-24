@@ -90,7 +90,7 @@ fun SettingsScreenView(
                 Toast.makeText(context, state.message, Toast.LENGTH_LONG).show()
                 hasManualUpdateCheck = false
             }
-            is AppUpdateState.ReadyToInstall, is AppUpdateState.NeedsInstallPermission -> {
+            is AppUpdateState.Installing, is AppUpdateState.ReadyToInstall, is AppUpdateState.NeedsInstallPermission -> {
                 hasManualUpdateCheck = false
             }
             else -> Unit
@@ -1184,7 +1184,9 @@ fun SettingsScreenView(
         }
 
         // 6. Tombol Check for Update (Berdiri Sendiri di Bawah Tombol Refresh tanpa Kotak Background)
-        val isUpdateBusy = appUpdateState is AppUpdateState.Checking || appUpdateState is AppUpdateState.Downloading
+        val isUpdateBusy = appUpdateState is AppUpdateState.Checking ||
+            appUpdateState is AppUpdateState.Downloading ||
+            appUpdateState is AppUpdateState.Installing
         Button(
             onClick = {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -1245,6 +1247,15 @@ fun SettingsScreenView(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Mengunduh ${state.progressPercent}%...", fontWeight = FontWeight.Bold)
+                }
+                is AppUpdateState.Installing -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Menyiapkan Instalasi...", fontWeight = FontWeight.Bold)
                 }
                 is AppUpdateState.NeedsInstallPermission -> {
                     Icon(

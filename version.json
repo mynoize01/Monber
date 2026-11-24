@@ -1,10 +1,10 @@
 {
-  "versionCode": 7,
-  "versionName": "1.4.6",
-  "tagName": "v1.4.6",
-  "releaseName": "MonBer v1.4.6",
-  "releaseNotes": "Pembaruan in-app dengan PackageInstaller API, dukungan Room Database caching offline, perbaikan UI pencarian header & popup login PN, serta publikasi rilis GitHub otomatis.",
-  "apkUrl": "https://github.com/mynoize01/Monber/releases/download/v1.4.6/MonBer-v1.4.6.apk",
-  "htmlUrl": "https://github.com/mynoize01/Monber/releases/tag/v1.4.6",
+  "versionCode": 8,
+  "versionName": "1.4.7",
+  "tagName": "v1.4.7",
+  "releaseName": "MonBer v1.4.7",
+  "releaseNotes": "Pembaruan in-app dengan PackageInstaller API, pill biru pada hasil GlobalSearchPopup, popup login PN yang lebih rapi, Room Database caching offline, dan rilis GitHub otomatis.",
+  "apkUrl": "https://github.com/mynoize01/Monber/releases/download/v1.4.7/MonBer-v1.4.7.apk",
+  "htmlUrl": "https://github.com/mynoize01/Monber/releases/tag/v1.4.7",
   "apkSizeBytes": 0
 }

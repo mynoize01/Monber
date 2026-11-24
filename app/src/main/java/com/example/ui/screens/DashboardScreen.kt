@@ -6649,6 +6649,40 @@ fun DashboardScreen(
                     }
                 )
             }
+            is AppUpdateState.Installing -> {
+                AlertDialog(
+                    onDismissRequest = { /* Keep visible briefly while PackageInstaller commits */ },
+                    containerColor = Color.White,
+                    title = {
+                        Text(
+                            text = "Menyiapkan Pemasangan",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF00386B)
+                        )
+                    },
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                color = Color(0xFF005FAF),
+                                strokeWidth = 3.dp
+                            )
+                            Text(
+                                text = "Memproses paket instalasi ${state.release.tagName}...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF334155),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    },
+                    confirmButton = {}
+                )
+            }
             is AppUpdateState.NeedsInstallPermission -> {
                 AlertDialog(
                     onDismissRequest = { viewModel.dismissUpdateDialog() },
