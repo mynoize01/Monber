@@ -83,6 +83,28 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      - name: Configure Gradle Maven Central Mirror
+        run: |
+          cat <<'EOF' > /tmp/ci-maven-mirror.init.gradle.kts
+          gradle.settingsEvaluated {
+              dependencyResolutionManagement {
+                  repositories {
+                      val mirror = maven {
+                          name = "GoogleMavenCentralMirror"
+                          url = uri("https://maven-central.storage-download.googleapis.com/maven2/")
+                      }
+                      remove(mirror)
+                      val mavenIdx = indexOfFirst { it.name.contains("MavenRepo", ignoreCase = true) }
+                      if (mavenIdx >= 0) {
+                          add(mavenIdx, mirror)
+                      } else {
+                          add(mirror)
+                      }
+                  }
+              }
+          }
+          EOF
+
       - name: Restore Cached Debug Keystore
         uses: actions/cache@v4
         with:
@@ -107,7 +129,7 @@ jobs:
           $GRADLE_CMD --version
           mkdir -p dist
 
-          GRADLE_CI_FLAGS="--no-daemon --no-configuration-cache --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g --stacktrace"
+          GRADLE_CI_FLAGS="--init-script /tmp/ci-maven-mirror.init.gradle.kts --no-daemon --no-configuration-cache --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g --stacktrace"
 
           REF_FULL="${{ github.ref }}"
           if [[ "$REF_FULL" == refs/tags/* ]]; then
@@ -195,7 +217,18 @@ jobs:
           if [ -x "./gradlew" ]; then
             GRADLE_CMD="./gradlew"
           fi
-          $GRADLE_CMD :app:testDebugUnitTest --no-daemon --no-configuration-cache --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g
+          TEST_FLAGS="--init-script /tmp/ci-maven-mirror.init.gradle.kts --no-daemon --no-configuration-cache --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g -Dorg.gradle.internal.http.connectionTimeout=60000 -Dorg.gradle.internal.http.socketTimeout=60000"
+          for attempt in 1 2 3; do
+            echo "Running unit tests (attempt $attempt/3)..."
+            if $GRADLE_CMD :app:testDebugUnitTest $TEST_FLAGS; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Unit test attempt $attempt failed; waiting 15s before retry..."
+              sleep 15
+            fi
+          done
+          exit 1
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
