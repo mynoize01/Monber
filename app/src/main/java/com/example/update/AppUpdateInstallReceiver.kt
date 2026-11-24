@@ -68,7 +68,9 @@ class AppUpdateInstallReceiver : BroadcastReceiver() {
                 _events.tryEmit(
                     PackageInstallEvent.Failed(
                         status,
-                        "Gagal memasang APK: tanda tangan aplikasi berbeda dengan versi yang terpasang."
+                        "Gagal memasang APK: tanda tangan aplikasi berbeda dengan versi yang terpasang.\n\n" +
+                            "Solusi: Hapus instalasi MonBer lama sekali saja lalu pasang APK terbaru secara manual, " +
+                            "atau pastikan build GitHub memakai keystore yang sama (debug.keystore.base64)."
                     )
                 )
             }

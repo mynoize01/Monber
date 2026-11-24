@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -27,7 +28,10 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+
+class ApkSignatureMismatchException(message: String) : IllegalStateException(message)
 
 data class GitHubReleaseInfo(
     val tagName: String,
@@ -583,6 +587,12 @@ object AppUpdateManager {
                 )
             }
 
+            val signatureCheckError = verifyApkSignatureMatchesInstalled(context, apkFile)
+            if (signatureCheckError != null) {
+                apkFile.delete()
+                return@withContext Result.failure(ApkSignatureMismatchException(signatureCheckError))
+            }
+
             val packageInstaller = context.packageManager.packageInstaller
             val params = PackageInstaller.SessionParams(
                 PackageInstaller.SessionParams.MODE_FULL_INSTALL
@@ -650,12 +660,87 @@ object AppUpdateManager {
         }
     }
 
-    suspend fun installApk(context: Context, apkFile: File): Boolean {
+    private fun verifyApkSignatureMatchesInstalled(context: Context, apkFile: File): String? {
+        return try {
+            val pm = context.packageManager
+            val installedCerts = getInstalledSigningCertSha256(pm, context.packageName)
+            val downloadedCerts = getArchiveSigningCertSha256(pm, apkFile.absolutePath)
+            if (installedCerts.isNotEmpty() && downloadedCerts.isNotEmpty() && installedCerts.intersect(downloadedCerts).isEmpty()) {
+                val installedShort = installedCerts.first().take(8)
+                val downloadedShort = downloadedCerts.first().take(8)
+                "Tanda tangan APK pembaruan ($downloadedShort) berbeda dengan versi yang terpasang ($installedShort).\n\n" +
+                    "Solusi: Hapus instalasi MonBer versi lama sekali saja lalu pasang APK terbaru secara manual, " +
+                    "dan pastikan workflow GitHub selalu memakai debug.keystore.base64 yang sama."
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun getInstalledSigningCertSha256(pm: PackageManager, packageName: String): Set<String> {
+        val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            pm.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+        } else {
+            pm.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
+        }
+        return extractSigningCertSha256(info)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun getArchiveSigningCertSha256(pm: PackageManager, apkPath: String): Set<String> {
+        val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            pm.getPackageArchiveInfo(apkPath, PackageManager.GET_SIGNING_CERTIFICATES)
+        } else {
+            pm.getPackageArchiveInfo(apkPath, PackageManager.GET_SIGNATURES)
+        } ?: return emptySet()
+        return extractSigningCertSha256(info)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun extractSigningCertSha256(info: PackageInfo): Set<String> {
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.signingInfo?.let { signingInfo ->
+                if (signingInfo.hasMultipleSigners()) {
+                    signingInfo.apkContentsSigners
+                } else {
+                    signingInfo.signingCertificateHistory
+                }
+            }
+        } else {
+            info.signatures
+        } ?: return emptySet()
+
+        val md = MessageDigest.getInstance("SHA-256")
+        return signatures.mapNotNull { sig ->
+            try {
+                md.digest(sig.toByteArray()).joinToString("") { "%02X".format(it) }
+            } catch (_: Exception) {
+                null
+            }
+        }.toSet()
+    }
+
+    suspend fun installApkResult(context: Context, apkFile: File): Result<Unit> {
         val packageInstallerResult = installApkWithPackageInstaller(context, apkFile)
         if (packageInstallerResult.isSuccess) {
-            return true
+            return Result.success(Unit)
         }
-        return launchApkInstaller(context, apkFile)
+        val err = packageInstallerResult.exceptionOrNull()
+        if (err is ApkSignatureMismatchException) {
+            return Result.failure(err)
+        }
+        return if (launchApkInstaller(context, apkFile)) {
+            Result.success(Unit)
+        } else {
+            Result.failure(err ?: IllegalStateException("Gagal membuka penginstal aplikasi."))
+        }
+    }
+
+    suspend fun installApk(context: Context, apkFile: File): Boolean {
+        return installApkResult(context, apkFile).isSuccess
     }
 
     fun launchApkInstaller(context: Context, apkFile: File): Boolean {

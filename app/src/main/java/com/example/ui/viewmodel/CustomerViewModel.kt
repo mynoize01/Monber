@@ -3860,9 +3860,9 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         downloadResult.onSuccess { apkFile ->
             if (AppUpdateManager.canRequestPackageInstalls(appContext)) {
                 appUpdateState.value = AppUpdateState.Installing(release, apkFile)
-                val launched = AppUpdateManager.installApk(appContext, apkFile)
-                if (!launched) {
-                    appUpdateState.value = AppUpdateState.Error("Gagal membuka penginstal aplikasi.")
+                val installResult = AppUpdateManager.installApkResult(appContext, apkFile)
+                installResult.onFailure { error ->
+                    appUpdateState.value = AppUpdateState.Error(error.message ?: "Gagal membuka penginstal aplikasi.")
                     showUpdateDialog.value = true
                 }
             } else {
@@ -3882,9 +3882,8 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 if (AppUpdateManager.canRequestPackageInstalls(appContext)) {
                     viewModelScope.launch {
                         appUpdateState.value = AppUpdateState.Installing(state.release, state.apkFile)
-                        val launched = AppUpdateManager.installApk(appContext, state.apkFile)
-                        if (!launched) {
-                            appUpdateState.value = AppUpdateState.Error("Gagal membuka penginstal aplikasi.")
+                        AppUpdateManager.installApkResult(appContext, state.apkFile).onFailure { error ->
+                            appUpdateState.value = AppUpdateState.Error(error.message ?: "Gagal membuka penginstal aplikasi.")
                             showUpdateDialog.value = true
                         }
                     }
@@ -3894,9 +3893,8 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 if (AppUpdateManager.canRequestPackageInstalls(appContext)) {
                     viewModelScope.launch {
                         appUpdateState.value = AppUpdateState.Installing(state.release, state.apkFile)
-                        val launched = AppUpdateManager.installApk(appContext, state.apkFile)
-                        if (!launched) {
-                            appUpdateState.value = AppUpdateState.Error("Gagal membuka penginstal aplikasi.")
+                        AppUpdateManager.installApkResult(appContext, state.apkFile).onFailure { error ->
+                            appUpdateState.value = AppUpdateState.Error(error.message ?: "Gagal membuka penginstal aplikasi.")
                             showUpdateDialog.value = true
                         }
                     }
