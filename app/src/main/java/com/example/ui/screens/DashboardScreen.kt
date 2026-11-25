@@ -80,6 +80,7 @@ import com.example.ui.components.TableLiquidSearchBar
 import com.example.data.model.CustomerEntity
 import com.example.data.model.desa
 import com.example.data.model.mapEkstrakompSegmen
+import com.example.data.util.DateTenorUtils
 import com.example.ui.viewmodel.CustomerViewModel
 import com.example.ui.viewmodel.SortColumn
 import com.example.ui.viewmodel.SortDirection
@@ -163,53 +164,11 @@ fun toProperCase(s: String): String {
     }
 }
 
-fun calculateElapsedMonthsSinceReal(tglReal: String): Int? {
-    if (tglReal.isBlank() || tglReal == "-") return null
-    try {
-        val parts = tglReal.trim().split(Regex("[/\\- .]+"))
-        if (parts.size >= 3) {
-            val (m, y) = if (parts[0].length == 4) {
-                Pair(parts[1].trim().toIntOrNull() ?: 1, parts[0].trim().toIntOrNull() ?: 2026)
-            } else {
-                Pair(parts[1].trim().toIntOrNull() ?: 1, parts[2].trim().take(4).toIntOrNull() ?: 2026)
-            }
-            if (m in 1..12) {
-                val nowCal = java.util.Calendar.getInstance()
-                val curYear = nowCal.get(java.util.Calendar.YEAR)
-                val curMonth = nowCal.get(java.util.Calendar.MONTH) + 1 // 1..12
-                val elapsed = (curYear - y) * 12 + (curMonth - m)
-                return if (elapsed < 0) 0 else elapsed
-            }
-        }
-    } catch (e: Exception) {
-        // Fallback
-    }
-    return null
-}
+fun calculateElapsedMonthsSinceReal(tglReal: String): Int? =
+    DateTenorUtils.monthsElapsedSince(tglReal)
 
-fun calculateRemainingMonthsUntilLunas(tglLunas: String): Int? {
-    if (tglLunas.isBlank() || tglLunas == "-") return null
-    try {
-        val parts = tglLunas.trim().split(Regex("[/\\- .]+"))
-        if (parts.size >= 3) {
-            val (m, y) = if (parts[0].length == 4) {
-                Pair(parts[1].trim().toIntOrNull() ?: 1, parts[0].trim().toIntOrNull() ?: 2026)
-            } else {
-                Pair(parts[1].trim().toIntOrNull() ?: 1, parts[2].trim().take(4).toIntOrNull() ?: 2026)
-            }
-            if (m in 1..12) {
-                val nowCal = java.util.Calendar.getInstance()
-                val curYear = nowCal.get(java.util.Calendar.YEAR)
-                val curMonth = nowCal.get(java.util.Calendar.MONTH) + 1 // 1..12
-                val remaining = (y - curYear) * 12 + (m - curMonth)
-                return if (remaining < 0) 0 else remaining
-            }
-        }
-    } catch (e: Exception) {
-        // Fallback
-    }
-    return null
-}
+fun calculateRemainingMonthsUntilLunas(tglLunas: String): Int? =
+    DateTenorUtils.monthsRemainingUntil(tglLunas)
 
 fun simplifyAddress(rawAlamat: String): String {
     if (rawAlamat.isBlank()) return rawAlamat
@@ -813,7 +772,10 @@ fun DashboardScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(3.dp)
-                        .background(Color.White.copy(alpha = 0.2f))
+                        .background(
+                            if (selectedBottomNav == "SETTING") Color(0xFF005FAF)
+                            else Color.White.copy(alpha = 0.2f)
+                        )
                 )
             }
 
@@ -948,6 +910,7 @@ fun DashboardScreen(
                         "SETTING" -> {
                             SettingsScreenView(
                                 viewModel = viewModel,
+                                onOpenAnalytics = { showDetailUnitDialog = true },
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
@@ -3355,7 +3318,7 @@ fun DashboardScreen(
 
         val jumlahAngsuran = remember(customer, dailyInfo) {
             val rate = customer.rate
-            val tenor = customer.tenor
+            val tenor = DateTenorUtils.effectiveTenor(customer.tenor, customer.tglReal, customer.tglLunas) ?: customer.tenor
             val plafond = customer.plafond
             val rawInstallment = if (tenor <= 0) {
                 0.0
@@ -3535,7 +3498,10 @@ fun DashboardScreen(
                                         DetailItemCol(label = "Segmen", value = if (customer.menuType == "EKSTRAKOMP") mapEkstrakompSegmen(customer.segmen) else customer.segmen)
                                     }
                                     Column(modifier = Modifier.weight(1f)) {
-                                        DetailItemCol(label = "Tenor", value = "${customer.tenor} Bulan")
+                                        val effectiveTenorVal = remember(customer.tenor, customer.tglReal, customer.tglLunas) {
+                                            DateTenorUtils.effectiveTenor(customer.tenor, customer.tglReal, customer.tglLunas) ?: customer.tenor
+                                        }
+                                        DetailItemCol(label = "Tenor", value = "$effectiveTenorVal Bulan")
                                     }
                                 }
                                 
@@ -3583,7 +3549,10 @@ fun DashboardScreen(
                                         DetailItemCol(label = "Tanggal Lunas", annotatedValue = lunasAnnotated)
                                     }
                                     Column(modifier = Modifier.weight(1f)) {
-                                        DetailItemCol(label = "Tenor", value = "${customer.tenor} Bulan")
+                                        val effectiveTenorVal = remember(customer.tenor, customer.tglReal, customer.tglLunas) {
+                                            DateTenorUtils.effectiveTenor(customer.tenor, customer.tglReal, customer.tglLunas) ?: customer.tenor
+                                        }
+                                        DetailItemCol(label = "Tenor", value = "$effectiveTenorVal Bulan")
                                     }
                                 }
                             }

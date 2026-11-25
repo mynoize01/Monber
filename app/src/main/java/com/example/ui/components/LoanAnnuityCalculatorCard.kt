@@ -169,7 +169,8 @@ fun LoanAnnuityCalculatorCard(
 
 @Composable
 fun LoanAnnuityCalculatorSection(
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    usePopupRowStyle: Boolean = false
 ) {
     var isExpanded by remember { mutableStateOf(false) }
     var selectedProduct by remember { mutableStateOf(LoanProductOption.KUPEDES) }
@@ -198,44 +199,81 @@ fun LoanAnnuityCalculatorSection(
 
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("loan_calc_toggle")
-                    .clickable { isExpanded = !isExpanded },
-                shape = RoundedCornerShape(10.dp),
-                color = if (isExpanded) Color(0xFF005FAF) else Color(0xFFF1F5F9),
-                border = BorderStroke(
+            val headerShape = if (usePopupRowStyle) RoundedCornerShape(16.dp) else RoundedCornerShape(10.dp)
+            val headerBgColor = if (usePopupRowStyle) {
+                if (isExpanded) Color(0xFFEBF4FF) else Color.Transparent
+            } else {
+                if (isExpanded) Color(0xFF005FAF) else Color(0xFFF1F5F9)
+            }
+            val headerBorder = if (usePopupRowStyle) {
+                null
+            } else {
+                BorderStroke(
                     width = 1.dp,
                     color = if (isExpanded) Color(0xFF00386B) else Color(0xFFCBD5E1)
                 )
+            }
+            val headerIconTint = if (usePopupRowStyle) {
+                Color(0xFF005FAF)
+            } else {
+                if (isExpanded) Color.White else Color(0xFF005FAF)
+            }
+            val headerTitleColor = if (usePopupRowStyle) {
+                if (isExpanded) Color(0xFF005FAF) else Color(0xFF1E293B)
+            } else {
+                if (isExpanded) Color.White else Color(0xFF00386B)
+            }
+            val headerSubtitleColor = if (usePopupRowStyle) {
+                Color(0xFF64748B)
+            } else {
+                if (isExpanded) Color.White.copy(alpha = 0.85f) else Color(0xFF64748B)
+            }
+            val headerChevronTint = if (usePopupRowStyle) {
+                if (isExpanded) Color(0xFF005FAF) else Color(0xFF64748B)
+            } else {
+                if (isExpanded) Color.White else Color(0xFF64748B)
+            }
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 50.dp)
+                    .clip(headerShape)
+                    .testTag("loan_calc_toggle")
+                    .clickable { isExpanded = !isExpanded },
+                shape = headerShape,
+                color = headerBgColor,
+                border = headerBorder
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(
+                            horizontal = if (usePopupRowStyle) 14.dp else 12.dp,
+                            vertical = if (usePopupRowStyle) 12.dp else 10.dp
+                        ),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(if (usePopupRowStyle) 14.dp else 8.dp),
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Calculate,
                             contentDescription = "Kalkulator Pinjaman",
-                            tint = if (isExpanded) Color.White else Color(0xFF005FAF),
-                            modifier = Modifier.size(18.dp)
+                            tint = headerIconTint,
+                            modifier = Modifier.size(if (usePopupRowStyle) 22.dp else 18.dp)
                         )
                         Column {
                             Text(
                                 text = "Kalkulator Pinjaman",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isExpanded) Color.White else Color(0xFF00386B)
+                                fontSize = if (usePopupRowStyle) 14.5.sp else 14.sp,
+                                fontWeight = if (usePopupRowStyle && !isExpanded) FontWeight.SemiBold else FontWeight.Bold,
+                                color = headerTitleColor
                             )
                             Text(
                                 text = if (isExpanded) {
@@ -243,15 +281,15 @@ fun LoanAnnuityCalculatorSection(
                                 } else {
                                     "Simulasi angsuran Kupedes, Kupra & KUR"
                                 },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (isExpanded) Color.White.copy(alpha = 0.85f) else Color(0xFF64748B)
+                                fontSize = 11.sp,
+                                color = headerSubtitleColor
                             )
                         }
                     }
                     Icon(
                         imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                         contentDescription = if (isExpanded) "Tutup Kalkulator" else "Buka Kalkulator",
-                        tint = if (isExpanded) Color.White else Color(0xFF64748B)
+                        tint = headerChevronTint
                     )
                 }
             }

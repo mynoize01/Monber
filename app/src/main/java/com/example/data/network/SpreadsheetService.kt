@@ -5,6 +5,7 @@ import com.example.data.model.CustomerEntity
 import com.example.data.model.SavingsAccount
 import com.example.data.model.Di319Row
 import com.example.data.model.mapEkstrakompSegmen
+import com.example.data.util.DateTenorUtils
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
@@ -1331,8 +1332,14 @@ object SpreadsheetService {
                     if (alamatIdx == -1 && (norm.contains("alamat") || norm.contains("tinggal"))) {
                         alamatIdx = idx
                     }
-                    if (tglRealIdx == -1 && (norm.contains("tgldh") || norm.contains("tglreal") || norm.contains("realisasi"))) {
+                    if (tglRealIdx == -1 && (norm.contains("tgldh") || norm.contains("tglreal") || (!norm.contains("besar") && !norm.contains("nominal") && norm.contains("realisasi")))) {
                         tglRealIdx = idx
+                    }
+                    if (tglLunasIdx == -1 && (norm.contains("tgljt") || norm.contains("tgllunas") || norm.contains("jatuhtempo") || norm.contains("jthtempo"))) {
+                        tglLunasIdx = idx
+                    }
+                    if (tenorIdx == -1 && (norm.contains("tenor") || norm.contains("jangkawaktu") || norm.contains("jkwaktu") || norm == "jw" || norm == "jangka")) {
+                        tenorIdx = idx
                     }
                     if (tglPhIdx == -1 && (norm.contains("tglph") || norm.contains("tanggalph") || norm.contains("tglhapus") || norm.contains("tanggalhapus") || norm == "phdate")) {
                         tglPhIdx = idx
@@ -1366,14 +1373,14 @@ object SpreadsheetService {
                         cleanCol == "pn" || cleanCol.contains("pn mantri") || cleanCol.contains("pn_mantri") || cleanCol.contains("personal number") || cleanCol.contains("singlepn") || cleanCol.contains("single pn") || cleanCol.contains("pn pengelola") -> pnIdx = idx
                         cleanCol.contains("nama mantri") || cleanCol.contains("nama_mantri") || cleanCol.contains("ao") || cleanCol.contains("petugas") || cleanCol.contains("am4") || cleanCol.contains("an4") || cleanCol.contains("ao4") -> mantriIdx = idx
                         cleanCol.contains("alamat") || cleanCol.contains("tinggal") -> alamatIdx = idx
-                        cleanCol.contains("tgl real") || cleanCol.contains("tgl_real") || cleanCol.contains("realisasi") || cleanCol.contains("tgl_transaksi") || cleanCol.contains("tgl_realisasi") -> tglRealIdx = idx
-                        cleanCol.contains("tgl jt") || cleanCol.contains("tgl_jt") || cleanCol.contains("jatuh tempo") || cleanCol.contains("tgl_jatuh_tempo") -> tglLunasIdx = idx
+                        (!normCol.contains("besar") && !normCol.contains("nominal") && !normCol.contains("plafon")) && (normCol.contains("tglreal") || normCol.contains("tglrealisasi") || normCol.contains("tgltransaksi") || normCol.contains("tglakad") || normCol.contains("tglcair") || normCol == "realisasi") -> tglRealIdx = idx
+                        normCol.contains("tgljt") || normCol.contains("tgllunas") || normCol.contains("jatuhtempo") || normCol.contains("jthtempo") || normCol.contains("maturity") -> tglLunasIdx = idx
                         normCol == "cif" || normCol.contains("cif") || normCol.contains("nocif") || normCol.contains("idnasabah") || normCol.contains("customerid") -> cifIdx = idx
                         cleanCol.contains("rekening") || cleanCol.contains("no_rek") || cleanCol.contains("no rekening") -> rekeningIdx = idx
                         cleanCol.contains("kolek bln lalu") || cleanCol.contains("kol_lalu") || cleanCol.contains("kol bln lalu") || cleanCol.contains("dpk_lalu") || cleanCol.contains("dpk bln lalu") || cleanCol.contains("rekening lalu") -> kolekBlnLaluIdx = idx
                         cleanCol.contains("rate") || cleanCol.contains("suku bunga") || cleanCol.contains("bunga %") || cleanCol.contains("suku_bunga") -> rateIdx = idx
                         cleanCol.contains("flag") || cleanCol.contains("keterangan") || cleanCol.contains("status") || cleanCol.contains("ket") -> flagIdx = idx
-                        cleanCol.contains("tenor") || cleanCol.contains("jangka waktu") || cleanCol.contains("jw") || cleanCol.contains("jangka_waktu") -> tenorIdx = idx
+                        normCol.contains("tenor") || normCol.contains("jangkawaktu") || normCol.contains("jkwaktu") || normCol == "jw" || normCol == "jangka" -> tenorIdx = idx
                         
                         cleanCol == "tunggakan pokok" || cleanCol.contains("tunggakan pokok") || cleanCol.contains("tgk pokok") -> tunggakanPokokIdx = idx
                         
@@ -1467,7 +1474,7 @@ object SpreadsheetService {
             val periodeStr = originalCols.getOrNull(pIdx)?.trim() ?: "01/01/2026"
             val nextPmtDateStr = originalCols.getOrNull(nIdx)?.trim() ?: "01/01/2026"
             
-            var tglReal = if (tglRealIdx != -1) originalCols.getOrNull(tglRealIdx)?.trim() ?: "" else "12/03/2024"
+            var tglReal = if (tglRealIdx != -1) originalCols.getOrNull(tglRealIdx)?.trim() ?: "" else ""
             if (menuType == "EKSTRAKOMP") {
                 if (tglRealIdx != -1 && tglRealIdx < originalCols.size && originalCols[tglRealIdx].trim().isNotBlank()) {
                     tglReal = originalCols[tglRealIdx].trim()
@@ -1476,7 +1483,7 @@ object SpreadsheetService {
                     tglReal = if (idxO < originalCols.size) originalCols[idxO].trim() else ""
                 }
             }
-            val tglLunas = if (tglLunasIdx != -1) originalCols.getOrNull(tglLunasIdx)?.trim() ?: "" else "12/03/2026"
+            val tglLunas = if (tglLunasIdx != -1) originalCols.getOrNull(tglLunasIdx)?.trim() ?: "" else ""
             
             // Re-fetch lancar, dpk, ... to recalculate kolek
             val kLancar = if (kolekLancarIdx != -1) parseFormattedDouble(originalCols.getOrNull(kolekLancarIdx) ?: "0") else 0.0
@@ -1666,7 +1673,7 @@ object SpreadsheetService {
             val kolekBlnLalu = if (rawBlnLalu.isNotBlank()) mapToKolekCategory(rawBlnLalu) else ""
             val rateStr = if (rateIdx != -1) originalCols.getOrNull(rateIdx) ?: "0" else "12.0"
             val flagStr = if (flagIdx != -1) originalCols.getOrNull(flagIdx)?.trim() ?: "" else "AKTIF"
-            val tenorStr = if (tenorIdx != -1) originalCols.getOrNull(tenorIdx) ?: "24" else "24"
+            val tenorStr = if (tenorIdx != -1) originalCols.getOrNull(tenorIdx) ?: "" else ""
             
             // Map Segmen
             val rawSegmen = if (segmenIdx != -1 && segmenIdx < originalCols.size) {
@@ -1773,7 +1780,7 @@ object SpreadsheetService {
             }
             val finalSetorPokok = setorPokokVal
             val rate = parseFormattedDouble(rateStr)
-            val tenor = tenorStr.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 24
+            val tenor = DateTenorUtils.parseTenorMonths(tenorStr, tglReal, tglLunas)
             
             // 1. Calculate Umur Tgk: mengitung hari dari tgl NEXT_PMT_DATE (N4) terhadap Periode (B4) using requested calculateUmurTgk function
             val calculatedUmurTgk = calculateUmurTgk(originalCols, isBCMerged).toInt()

@@ -42,6 +42,8 @@ import android.os.Build
 import com.example.BuildConfig
 import com.example.ui.components.LoanAnnuityCalculatorSection
 import com.example.ui.components.PnLoginPopupDialog
+import com.example.ui.components.SettingsMenuPopupDialog
+import com.example.ui.components.SettingsWaveProfileHeader
 import com.example.ui.viewmodel.CustomerViewModel
 import com.example.update.AppUpdateManager
 import com.example.update.AppUpdateState
@@ -49,7 +51,8 @@ import com.example.update.AppUpdateState
 @Composable
 fun SettingsScreenView(
     viewModel: CustomerViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenAnalytics: () -> Unit = { viewModel.setBottomNav("DASHBOARD") }
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -62,17 +65,6 @@ fun SettingsScreenView(
     val lastSyncMetadata by viewModel.lastSyncMetadata.collectAsState()
     val loggedInPN by viewModel.loggedInPN.collectAsState()
     val loggedInMantriDetails by viewModel.loggedInMantriDetails.collectAsState()
-
-    val isOfflineModeEnabled by viewModel.isOfflineModeEnabled.collectAsState()
-    val offlineNameUrl1 by viewModel.offlineNameUrl1.collectAsState()
-    val offlineNameUrl2 by viewModel.offlineNameUrl2.collectAsState()
-    val offlineNameUrl3 by viewModel.offlineNameUrl3.collectAsState()
-    val offlineNameUrl4 by viewModel.offlineNameUrl4.collectAsState()
-    val offlineNameEUrl1 by viewModel.offlineNameEUrl1.collectAsState()
-    val offlineNameEUrl2 by viewModel.offlineNameEUrl2.collectAsState()
-    val offlineNameKUrl1 by viewModel.offlineNameKUrl1.collectAsState()
-    val offlineNameDi319Url by viewModel.offlineNameDi319Url.collectAsState()
-    val offlineNameLw325Daily by viewModel.offlineNameLw325Daily.collectAsState()
 
     // App Update (GitHub Releases: https://github.com/mynoize01/Monber.git)
     val appUpdateState by viewModel.appUpdateState.collectAsState()
@@ -272,846 +264,798 @@ fun SettingsScreenView(
         }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color(0xFFF4F6F9))
-            .verticalScroll(scrollState)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // 1. Pengaturan Aplikasi (Ikon Gear membuka popup Mode Offline & Pengaturan Teks WA)
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                    Text(
-                        text = "Pengaturan Aplikasi",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF00386B)
-                    )
-                    Text(
-                        text = "Mode offline, teks pesan WA & cek update",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF535F70)
-                    )
-                }
-                IconButton(
-                    onClick = { showAppPreferencesDialog = true },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFFEBF5FF))
-                        .testTag("app_settings_gear_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "Buka Pengaturan Aplikasi",
-                        tint = Color(0xFF005FAF),
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-        }
+    val cleanPnDigits = remember(loggedInPN) {
+        val raw = loggedInPN.trim()
+        val digits = Regex("""\d{4,9}""").find(raw)?.value ?: raw
+        digits.trimStart('0').ifEmpty { digits }
+    }
 
-        // 2. Input Link (Kotak Mandiri Terpisah)
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Input Link",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00386B)
-                        )
-                        Text(
-                            text = "Kelola link spreadsheet Daily, Monthly & LW321 All",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF535F70)
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.Default.Link,
-                        contentDescription = null,
-                        tint = Color(0xFF005FAF),
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-
-                HorizontalDivider(color = Color(0xFFE2E8F0))
-
-                // Tombol "Input Link"
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { isInputLinkSelected = !isInputLinkSelected },
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (isInputLinkSelected) Color(0xFF005FAF) else Color(0xFFEBF5FF),
-                    border = androidx.compose.foundation.BorderStroke(
-                        width = 1.dp,
-                        color = if (isInputLinkSelected) Color(0xFF00386B) else Color(0xFF005FAF)
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Link,
-                                contentDescription = "Input Link",
-                                tint = if (isInputLinkSelected) Color.White else Color(0xFF005FAF),
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Column {
-                                Text(
-                                    text = "Input Link Spreadsheet",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isInputLinkSelected) Color.White else Color(0xFF00386B)
-                                )
-                                Text(
-                                    text = if (isInputLinkSelected) "Pilihan kategori link aktif di bawah" else "Ketuk untuk membuka menu link",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (isInputLinkSelected) Color.White.copy(alpha = 0.85f) else Color(0xFF535F70)
-                                )
-                            }
-                        }
-                        Icon(
-                            imageVector = if (isInputLinkSelected) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = if (isInputLinkSelected) Color.White else Color(0xFF005FAF)
-                        )
-                    }
-                }
-
-                // 3 Baris Menu di atas (LW321 All, Monthly, Daily) jika tombol Input Link dipilih
-                AnimatedVisibility(visible = isInputLinkSelected) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFFF1F5F9))
-                                .padding(4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            CategoryTabItem(
-                                title = "LW321 All",
-                                isSelected = selectedLinkCategory == "LW321_ALL",
-                                onClick = { selectedLinkCategory = "LW321_ALL" },
-                                modifier = Modifier.weight(1f)
-                            )
-                            CategoryTabItem(
-                                title = "Monthly",
-                                isSelected = selectedLinkCategory == "MONTHLY",
-                                onClick = { selectedLinkCategory = "MONTHLY" },
-                                modifier = Modifier.weight(1f)
-                            )
-                            CategoryTabItem(
-                                title = "Daily",
-                                isSelected = selectedLinkCategory == "DAILY",
-                                onClick = { selectedLinkCategory = "DAILY" },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        // Konten Menu Link Berdasarkan Kategori yang Dipilih (di dalam Pengaturan Aplikasi)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xFFF8FAFC), RoundedCornerShape(12.dp))
-                                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
-                                .padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            when (selectedLinkCategory) {
-                        "LW321_ALL" -> {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CalendarMonth,
-                                    contentDescription = null,
-                                    tint = Color(0xFF005FAF),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "LW321 All (12 Bulan Januari - Desember)",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF00386B)
-                                )
-                            }
-                            Text(
-                                text = "Masukkan link spreadsheet LW321 untuk setiap bulan:",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF535F70)
-                            )
-
-                            val monthNames = listOf(
-                                "Januari", "Februari", "Maret", "April", "Mei", "Juni",
-                                "Juli", "Agustus", "September", "Oktober", "November", "Desember"
-                            )
-
-                            monthNames.forEachIndexed { index, monthName ->
-                                val monthNum = index + 1
-                                val currentVal by viewModel.lw321AllUrls[monthNum]?.collectAsState() ?: remember { mutableStateOf("") }
-                                LinkInputField(
-                                    label = "${String.format("%02d", monthNum)}. $monthName",
-                                    value = currentVal,
-                                    onValueChange = { viewModel.saveLw321AllLink(monthNum, it) },
-                                    onPaste = {
-                                        val clip = clipboardManager.getText()?.text ?: ""
-                                        if (clip.isNotBlank()) {
-                                            viewModel.saveLw321AllLink(monthNum, clip)
-                                            Toast.makeText(context, "$monthName link disalin!", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                    onClear = { viewModel.saveLw321AllLink(monthNum, "") }
-                                )
-                            }
-                        }
-
-                        "MONTHLY" -> {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.DateRange,
-                                    contentDescription = null,
-                                    tint = Color(0xFF005FAF),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "Monthly Links",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF00386B)
-                                )
-                            }
-                            Text(
-                                text = "Input link spreadsheet bulanan dan database:",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF535F70)
-                            )
-
-                            // 1. Kategori Intrakomp
-                            Text(
-                                text = "Intrakomp",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF00386B),
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                            LinkInputField(
-                                label = "LW321 Bulan Lalu",
-                                value = url1,
-                                onValueChange = { viewModel.saveLink("url_1", it) },
-                                onPaste = {
-                                    val clip = clipboardManager.getText()?.text ?: ""
-                                    viewModel.saveLink("url_1", clip)
-                                },
-                                onClear = { viewModel.saveLink("url_1", "") }
-                            )
-
-                            LinkInputField(
-                                label = "LW321 Akhir Bulan",
-                                value = url2,
-                                onValueChange = { viewModel.saveLink("url_2", it) },
-                                onPaste = {
-                                    val clip = clipboardManager.getText()?.text ?: ""
-                                    viewModel.saveLink("url_2", clip)
-                                },
-                                onClear = { viewModel.saveLink("url_2", "") }
-                            )
-
-                            // 2. Kategori Ekstrakomp
-                            Text(
-                                text = "Ekstrakomp",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF00386B),
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                            LinkInputField(
-                                label = "LW325 Akhir Bulan",
-                                value = eUrl1,
-                                onValueChange = { viewModel.saveLink("e_url_1", it) },
-                                onPaste = {
-                                    val clip = clipboardManager.getText()?.text ?: ""
-                                    viewModel.saveLink("e_url_1", clip)
-                                },
-                                onClear = { viewModel.saveLink("e_url_1", "") }
-                            )
-
-                            // 3. Kategori Database
-                            Text(
-                                text = "Database",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF00386B),
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                            LinkInputField(
-                                label = "Database LW321",
-                                value = url4,
-                                onValueChange = { viewModel.saveLink("url_4", it) },
-                                onPaste = {
-                                    val clip = clipboardManager.getText()?.text ?: ""
-                                    viewModel.saveLink("url_4", clip)
-                                },
-                                onClear = { viewModel.saveLink("url_4", "") }
-                            )
-
-                            LinkInputField(
-                                label = "Database LW325",
-                                value = eUrl2,
-                                onValueChange = { viewModel.saveLink("e_url_2", it) },
-                                onPaste = {
-                                    val clip = clipboardManager.getText()?.text ?: ""
-                                    viewModel.saveLink("e_url_2", clip)
-                                },
-                                onClear = { viewModel.saveLink("e_url_2", "") }
-                            )
-
-                            LinkInputField(
-                                label = "Database Kelolaan",
-                                value = kUrl1,
-                                onValueChange = { viewModel.saveLink("k_url_1", it) },
-                                onPaste = {
-                                    val clip = clipboardManager.getText()?.text ?: ""
-                                    viewModel.saveLink("k_url_1", clip)
-                                },
-                                onClear = { viewModel.saveLink("k_url_1", "") }
-                            )
-                        }
-
-                        "DAILY" -> {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Today,
-                                    contentDescription = null,
-                                    tint = Color(0xFF005FAF),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "Daily Links",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF00386B)
-                                )
-                            }
-                            Text(
-                                text = "Input link spreadsheet harian (Daily):",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF535F70)
-                            )
-
-                            // 1. LW321 Daily
-                            LinkInputField(
-                                label = "LW321 Daily",
-                                value = url3,
-                                onValueChange = { viewModel.saveLink("url_3", it) },
-                                onPaste = {
-                                    val clip = clipboardManager.getText()?.text ?: ""
-                                    viewModel.saveLink("url_3", clip)
-                                },
-                                onClear = { viewModel.saveLink("url_3", "") }
-                            )
-
-                            // 2. DI319
-                            LinkInputField(
-                                label = "DI319",
-                                value = di319Url,
-                                onValueChange = { viewModel.saveLink("di319_url", it) },
-                                onPaste = {
-                                    val clip = clipboardManager.getText()?.text ?: ""
-                                    viewModel.saveLink("di319_url", clip)
-                                },
-                                onClear = { viewModel.saveLink("di319_url", "") }
-                            )
-
-                            // 3. LW325 Daily
-                            LinkInputField(
-                                label = "LW325 Daily",
-                                value = lw325DailyUrl,
-                                onValueChange = { viewModel.saveLink("lw325_daily_url", it) },
-                                onPaste = {
-                                    val clip = clipboardManager.getText()?.text ?: ""
-                                    viewModel.saveLink("lw325_daily_url", clip)
-                                },
-                                onClear = { viewModel.saveLink("lw325_daily_url", "") }
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // Tombol Simpan & Sinkronkan
-                    Button(
-                        onClick = {
-                            viewModel.refreshSpreadsheetData()
-                            Toast.makeText(context, "Link tersimpan & sedang disinkronkan...", Toast.LENGTH_SHORT).show()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth().height(44.dp)
-                    ) {
-                        if (isRefreshing) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Sedang Menyinkronkan...")
-                        } else {
-                            Icon(imageVector = Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Simpan & Sinkronkan Sekarang")
-                        }
-                    }
-                }
-                }
-            }
+    val headerDisplayName = remember(loggedInPN, loggedInMantriDetails) {
+        when {
+            loggedInPN.isBlank() -> "Masuk Akun PN"
+            loggedInMantriDetails.contains(" - ") ->
+                loggedInMantriDetails.substringAfter(" - ").trim().ifBlank { "Mantri BRI" }
+            loggedInPN.trim() == "207803" -> "Nurul Mubin"
+            loggedInMantriDetails.isNotBlank() && loggedInMantriDetails != loggedInPN ->
+                loggedInMantriDetails.trim()
+            else -> "Mantri BRI"
         }
     }
 
-        // 3. Akun Pengelola / Akses PN Mantri (Posisi paling bawah dibawah mode offline)
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+    val headerSubtitle = remember(loggedInPN, cleanPnDigits) {
+        if (loggedInPN.isNotBlank()) {
+            "Mantri • PN $cleanPnDigits"
+        } else {
+            "Ketuk untuk Login PN"
+        }
+    }
+
+    val pnInfoDisplay = if (loggedInPN.isNotBlank()) {
+        val details = if (loggedInMantriDetails.isNotBlank() && loggedInMantriDetails.contains(" - ")) {
+            loggedInMantriDetails
+        } else if (loggedInMantriDetails.isNotBlank() && loggedInMantriDetails != loggedInPN) {
+            "$loggedInPN - $loggedInMantriDetails"
+        } else if (loggedInPN.trim() == "207803") {
+            "207803 - Nurul Mubin"
+        } else {
+            "$loggedInPN - Mantri"
+        }
+        "PN Login: $details"
+    } else {
+        "Belum ada PN aktif. Masuk untuk akses Kelolaan."
+    }
+
+    val lastSyncText = remember(lastSyncMetadata) {
+        val ts = lastSyncMetadata?.lastSyncedAt ?: 0L
+        if (ts > 0L) {
+            java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale("id", "ID"))
+                .format(java.util.Date(ts))
+        } else {
+            "Belum ada sinkronisasi"
+        }
+    }
+
+    val hasUpdateBadge = appUpdateState is AppUpdateState.UpdateAvailable ||
+        appUpdateState is AppUpdateState.ReadyToInstall ||
+        appUpdateState is AppUpdateState.NeedsInstallPermission
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.White)
+    ) {
+        // Pinned Curved BRI Blue-to-White Wave Header (full-bleed left, right & top)
+        SettingsWaveProfileHeader(
+            displayName = headerDisplayName,
+            subtitle = headerSubtitle,
+            onProfileClick = { showLoginDialog = true },
+            seamlessTopBlend = true,
+            endCornerContent = {
+                IconButton(
+                    onClick = { showAppPreferencesDialog = true },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 12.dp, bottom = 4.dp)
+                        .size(48.dp)
+                        .testTag("app_settings_gear_button")
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Badge, contentDescription = null, tint = Color(0xFF005FAF), modifier = Modifier.size(20.dp))
-                        Text(
-                            text = "Akses PN Mantri",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00386B)
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Buka Pengaturan Aplikasi",
+                            tint = Color(0xFF005FAF),
+                            modifier = Modifier.size(26.dp)
                         )
-                    }
-
-                    if (loggedInPN.isNotBlank()) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFFF1F5F9)
-                        ) {
-                            Text(
-                                text = "Aktif",
-                                color = Color(0xFF005FAF),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        if (hasUpdateBadge) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(8.dp)
+                                    .background(Color(0xFFF97316), shape = androidx.compose.foundation.shape.CircleShape)
                             )
-                        }
-                    }
-                }
-
-                HorizontalDivider(color = Color(0xFFE2E8F0))
-
-                val pnInfoDisplay = if (loggedInPN.isNotBlank()) {
-                    val details = if (loggedInMantriDetails.isNotBlank() && loggedInMantriDetails.contains(" - ")) {
-                        loggedInMantriDetails
-                    } else if (loggedInMantriDetails.isNotBlank() && loggedInMantriDetails != loggedInPN) {
-                        "$loggedInPN - $loggedInMantriDetails"
-                    } else if (loggedInPN.trim() == "207803") {
-                        "207803 - Nurul Mubin"
-                    } else {
-                        "$loggedInPN - Mantri"
-                    }
-                    "PN Login: $details"
-                } else {
-                    "Belum ada PN yang aktif. Silakan masukkan nomor PN."
-                }
-
-                Text(
-                    text = pnInfoDisplay,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF334155)
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = { showLoginDialog = true },
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (loggedInPN.isBlank()) "Login PN" else "Ubah PN")
-                    }
-
-                    if (loggedInPN.isNotBlank()) {
-                        OutlinedButton(
-                            onClick = { showConfirmLogoff = true },
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFD32F2F)),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(imageVector = Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Logoff")
                         }
                     }
                 }
             }
-        }
+        )
 
-        // 4. Kalkulator Pinjaman & Kalkulator Selisih Bulan (Dalam Satu Kotak di Bawah Akses PN Mantri)
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        // Scrollable Content from Blue Wave Boundary Downward
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(Color.White)
+                .verticalScroll(scrollState)
+                .padding(horizontal = 14.dp, vertical = 6.dp)
+                .padding(bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Bagian Atas: Kalkulator Pinjaman
-                LoanAnnuityCalculatorSection()
 
-                HorizontalDivider(color = Color(0xFFE2E8F0))
-
-                // Bagian Bawah: Tombol Kalkulator Selisih Bulan (Default Hidden / Tertutup)
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("month_diff_calc_toggle")
-                        .clickable { isCalculatorExpanded = !isCalculatorExpanded },
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (isCalculatorExpanded) Color(0xFF005FAF) else Color(0xFFF1F5F9),
-                    border = androidx.compose.foundation.BorderStroke(
-                        width = 1.dp,
-                        color = if (isCalculatorExpanded) Color(0xFF00386B) else Color(0xFFCBD5E1)
-                    )
-                ) {
-                    Row(
+                    // 2. Input Link Spreadsheet (Expandable Row)
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .heightIn(min = 52.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { isInputLinkSelected = !isInputLinkSelected },
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isInputLinkSelected) Color(0xFFEBF4FF) else Color.Transparent
                     ) {
                         Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.DateRange,
-                                contentDescription = null,
-                                tint = if (isCalculatorExpanded) Color.White else Color(0xFF005FAF),
-                                modifier = Modifier.size(18.dp)
+                                imageVector = Icons.Default.Link,
+                                contentDescription = "Input Link Spreadsheet",
+                                tint = Color(0xFF005FAF),
+                                modifier = Modifier.size(22.dp)
                             )
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Kalkulator Selisih Bulan",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isCalculatorExpanded) Color.White else Color(0xFF00386B)
+                                    text = "Input Link Spreadsheet",
+                                    fontSize = 14.5.sp,
+                                    fontWeight = if (isInputLinkSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                    color = if (isInputLinkSelected) Color(0xFF005FAF) else Color(0xFF1E293B)
                                 )
                                 Text(
-                                    text = if (isCalculatorExpanded) "Ketuk untuk menyembunyikan kalkulator" else "Ketuk untuk membuka kalkulator selisih bulan",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (isCalculatorExpanded) Color.White.copy(alpha = 0.85f) else Color(0xFF64748B)
+                                    text = if (isInputLinkSelected) {
+                                        "Pilihan kategori link aktif di bawah"
+                                    } else {
+                                        "Kelola link Daily, Monthly & LW321 All"
+                                    },
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF64748B),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
+                            Icon(
+                                imageVector = if (isInputLinkSelected) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (isInputLinkSelected) "Tutup Input Link" else "Buka Input Link",
+                                tint = if (isInputLinkSelected) Color(0xFF005FAF) else Color(0xFF64748B)
+                            )
                         }
-                        Icon(
-                            imageVector = if (isCalculatorExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = if (isCalculatorExpanded) Color.White else Color(0xFF64748B)
-                        )
                     }
-                }
 
-                // Konten Kalkulator (Default Tersembunyi / Hidden)
-                AnimatedVisibility(
-                    visible = isCalculatorExpanded,
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut()
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFFF8FAFC), RoundedCornerShape(10.dp))
-                            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(10.dp))
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        // 1 tombol input tgl/bulan awal dan 1 tombol bulan akhir
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    // Konten 3 Kategori Link (LW321 All, Monthly, Daily)
+                    AnimatedVisibility(visible = isInputLinkSelected) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp, vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            OutlinedButton(
-                                onClick = {
-                                    startDatePickerDialog.updateDate(
-                                        startCal.get(java.util.Calendar.YEAR),
-                                        startCal.get(java.util.Calendar.MONTH),
-                                        startCal.get(java.util.Calendar.DAY_OF_MONTH)
-                                    )
-                                    startDatePickerDialog.show()
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = Color.White,
-                                    contentColor = Color(0xFF00386B)
-                                ),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1)),
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFFF1F5F9))
+                                    .padding(4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    Text(
-                                        text = "Tgl / Bulan Awal",
-                                        fontSize = 10.sp,
-                                        color = Color(0xFF64748B),
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.CalendarToday,
-                                            contentDescription = null,
-                                            tint = Color(0xFF005FAF),
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                        Text(
-                                            text = startSelectedDateStr,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF00386B)
-                                        )
-                                    }
-                                }
+                                CategoryTabItem(
+                                    title = "LW321 All",
+                                    isSelected = selectedLinkCategory == "LW321_ALL",
+                                    onClick = { selectedLinkCategory = "LW321_ALL" },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                CategoryTabItem(
+                                    title = "Monthly",
+                                    isSelected = selectedLinkCategory == "MONTHLY",
+                                    onClick = { selectedLinkCategory = "MONTHLY" },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                CategoryTabItem(
+                                    title = "Daily",
+                                    isSelected = selectedLinkCategory == "DAILY",
+                                    onClick = { selectedLinkCategory = "DAILY" },
+                                    modifier = Modifier.weight(1f)
+                                )
                             }
 
-                            OutlinedButton(
-                                onClick = {
-                                    endDatePickerDialog.updateDate(
-                                        endCal.get(java.util.Calendar.YEAR),
-                                        endCal.get(java.util.Calendar.MONTH),
-                                        endCal.get(java.util.Calendar.DAY_OF_MONTH)
-                                    )
-                                    endDatePickerDialog.show()
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = Color.White,
-                                    contentColor = Color(0xFF00386B)
-                                ),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1)),
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
-                            ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    Text(
-                                        text = "Bulan / Tgl Akhir",
-                                        fontSize = 10.sp,
-                                        color = Color(0xFF64748B),
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Event,
-                                            contentDescription = null,
-                                            tint = Color(0xFF005FAF),
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                        Text(
-                                            text = endSelectedDateStr,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF00386B)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        // Info Hasil Selisih Bulan
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            color = Color(0xFFEBF5FF),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF93C5FD))
-                        ) {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                                    .background(Color(0xFFF8FAFC), RoundedCornerShape(14.dp))
+                                    .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(14.dp))
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
+                                when (selectedLinkCategory) {
+                                    "LW321_ALL" -> {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.CalendarMonth,
+                                                contentDescription = null,
+                                                tint = Color(0xFF005FAF),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Text(
+                                                text = "LW321 All (12 Bulan Januari - Desember)",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF00386B)
+                                            )
+                                        }
+                                        Text(
+                                            text = "Masukkan link spreadsheet LW321 untuk setiap bulan:",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF535F70)
+                                        )
+
+                                        val monthNames = listOf(
+                                            "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+                                            "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+                                        )
+
+                                        monthNames.forEachIndexed { index, monthName ->
+                                            val monthNum = index + 1
+                                            val currentVal by viewModel.lw321AllUrls[monthNum]?.collectAsState() ?: remember { mutableStateOf("") }
+                                            LinkInputField(
+                                                label = "${String.format("%02d", monthNum)}. $monthName",
+                                                value = currentVal,
+                                                onValueChange = { viewModel.saveLw321AllLink(monthNum, it) },
+                                                onPaste = {
+                                                    val clip = clipboardManager.getText()?.text ?: ""
+                                                    if (clip.isNotBlank()) {
+                                                        viewModel.saveLw321AllLink(monthNum, clip)
+                                                        Toast.makeText(context, "$monthName link disalin!", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                },
+                                                onClear = { viewModel.saveLw321AllLink(monthNum, "") }
+                                            )
+                                        }
+                                    }
+
+                                    "MONTHLY" -> {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.DateRange,
+                                                contentDescription = null,
+                                                tint = Color(0xFF005FAF),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Text(
+                                                text = "Monthly Links",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF00386B)
+                                            )
+                                        }
+                                        Text(
+                                            text = "Input link spreadsheet bulanan dan database:",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF535F70)
+                                        )
+
+                                        Text(
+                                            text = "Intrakomp",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF00386B),
+                                            modifier = Modifier.padding(top = 4.dp)
+                                        )
+                                        LinkInputField(
+                                            label = "LW321 Bulan Lalu",
+                                            value = url1,
+                                            onValueChange = { viewModel.saveLink("url_1", it) },
+                                            onPaste = {
+                                                val clip = clipboardManager.getText()?.text ?: ""
+                                                viewModel.saveLink("url_1", clip)
+                                            },
+                                            onClear = { viewModel.saveLink("url_1", "") }
+                                        )
+
+                                        LinkInputField(
+                                            label = "LW321 Akhir Bulan",
+                                            value = url2,
+                                            onValueChange = { viewModel.saveLink("url_2", it) },
+                                            onPaste = {
+                                                val clip = clipboardManager.getText()?.text ?: ""
+                                                viewModel.saveLink("url_2", clip)
+                                            },
+                                            onClear = { viewModel.saveLink("url_2", "") }
+                                        )
+
+                                        Text(
+                                            text = "Ekstrakomp",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF00386B),
+                                            modifier = Modifier.padding(top = 4.dp)
+                                        )
+                                        LinkInputField(
+                                            label = "LW325 Akhir Bulan",
+                                            value = eUrl1,
+                                            onValueChange = { viewModel.saveLink("e_url_1", it) },
+                                            onPaste = {
+                                                val clip = clipboardManager.getText()?.text ?: ""
+                                                viewModel.saveLink("e_url_1", clip)
+                                            },
+                                            onClear = { viewModel.saveLink("e_url_1", "") }
+                                        )
+
+                                        Text(
+                                            text = "Database",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF00386B),
+                                            modifier = Modifier.padding(top = 4.dp)
+                                        )
+                                        LinkInputField(
+                                            label = "Database LW321",
+                                            value = url4,
+                                            onValueChange = { viewModel.saveLink("url_4", it) },
+                                            onPaste = {
+                                                val clip = clipboardManager.getText()?.text ?: ""
+                                                viewModel.saveLink("url_4", clip)
+                                            },
+                                            onClear = { viewModel.saveLink("url_4", "") }
+                                        )
+
+                                        LinkInputField(
+                                            label = "Database LW325",
+                                            value = eUrl2,
+                                            onValueChange = { viewModel.saveLink("e_url_2", it) },
+                                            onPaste = {
+                                                val clip = clipboardManager.getText()?.text ?: ""
+                                                viewModel.saveLink("e_url_2", clip)
+                                            },
+                                            onClear = { viewModel.saveLink("e_url_2", "") }
+                                        )
+
+                                        LinkInputField(
+                                            label = "Database Kelolaan",
+                                            value = kUrl1,
+                                            onValueChange = { viewModel.saveLink("k_url_1", it) },
+                                            onPaste = {
+                                                val clip = clipboardManager.getText()?.text ?: ""
+                                                viewModel.saveLink("k_url_1", clip)
+                                            },
+                                            onClear = { viewModel.saveLink("k_url_1", "") }
+                                        )
+                                    }
+
+                                    "DAILY" -> {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Today,
+                                                contentDescription = null,
+                                                tint = Color(0xFF005FAF),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Text(
+                                                text = "Daily Links",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF00386B)
+                                            )
+                                        }
+                                        Text(
+                                            text = "Input link spreadsheet harian (Daily):",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF535F70)
+                                        )
+
+                                        LinkInputField(
+                                            label = "LW321 Daily",
+                                            value = url3,
+                                            onValueChange = { viewModel.saveLink("url_3", it) },
+                                            onPaste = {
+                                                val clip = clipboardManager.getText()?.text ?: ""
+                                                viewModel.saveLink("url_3", clip)
+                                            },
+                                            onClear = { viewModel.saveLink("url_3", "") }
+                                        )
+
+                                        LinkInputField(
+                                            label = "DI319",
+                                            value = di319Url,
+                                            onValueChange = { viewModel.saveLink("di319_url", it) },
+                                            onPaste = {
+                                                val clip = clipboardManager.getText()?.text ?: ""
+                                                viewModel.saveLink("di319_url", clip)
+                                            },
+                                            onClear = { viewModel.saveLink("di319_url", "") }
+                                        )
+
+                                        LinkInputField(
+                                            label = "LW325 Daily",
+                                            value = lw325DailyUrl,
+                                            onValueChange = { viewModel.saveLink("lw325_daily_url", it) },
+                                            onPaste = {
+                                                val clip = clipboardManager.getText()?.text ?: ""
+                                                viewModel.saveLink("lw325_daily_url", clip)
+                                            },
+                                            onClear = { viewModel.saveLink("lw325_daily_url", "") }
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                Button(
+                                    onClick = {
+                                        viewModel.refreshSpreadsheetData()
+                                        Toast.makeText(context, "Link tersimpan & sedang disinkronkan...", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 48.dp)
+                                ) {
+                                    if (isRefreshing) {
+                                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Sedang Menyinkronkan...")
+                                    } else {
+                                        Icon(imageVector = Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Simpan & Sinkronkan Sekarang", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Akses PN Mantri Row
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { showLoginDialog = true },
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.Transparent
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Badge,
+                                contentDescription = "Akses PN Mantri",
+                                tint = Color(0xFF005FAF),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Hasil Selisih Bulan",
-                                    fontSize = 11.sp,
+                                    text = "Akses PN Mantri",
+                                    fontSize = 14.5.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFF1E40AF)
+                                    color = Color(0xFF1E293B)
                                 )
                                 Text(
-                                    text = monthDiffResult,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF005FAF)
+                                    text = pnInfoDisplay,
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF64748B),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                                if (monthDiffDetail.isNotBlank()) {
-                                    Text(
-                                        text = monthDiffDetail,
-                                        fontSize = 10.sp,
-                                        color = Color(0xFF475569)
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFFEBF4FF)
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(9.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = if (loggedInPN.isBlank()) "Login PN" else "Ubah PN",
+                                        tint = Color(0xFF005FAF),
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
                         }
                     }
-                }
-            }
-        }
 
-        // 6. Tombol Refresh / Sinkron Data & Info Memori Lokal (Berdiri Sendiri di Luar Kotak Akses PN)
-        val lastSyncText = remember(lastSyncMetadata) {
-            val ts = lastSyncMetadata?.lastSyncedAt ?: 0L
-            if (ts > 0L) {
-                java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale("id", "ID"))
-                    .format(java.util.Date(ts))
-            } else {
-                "Belum ada sinkronisasi"
-            }
-        }
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Button(
-                onClick = {
-                    viewModel.refreshSpreadsheetData(force = true)
-                    Toast.makeText(context, "Menyinkronkan data ke memori HP...", Toast.LENGTH_SHORT).show()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .defaultMinSize(minHeight = 48.dp)
-                    .testTag("settings_refresh_button")
-            ) {
-                if (isRefreshing) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color = Color.White,
-                        strokeWidth = 2.dp
+                    HorizontalDivider(
+                        color = Color(0xFFF1F5F9),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Sedang Menyinkronkan...", fontWeight = FontWeight.Bold)
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Refresh Data",
-                        modifier = Modifier.size(18.dp)
+
+                    // 4. Kalkulator Pinjaman (Popup Row Style)
+                    LoanAnnuityCalculatorSection(usePopupRowStyle = true)
+
+                    // 5. Kalkulator Selisih Bulan (Popup Row Style)
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .testTag("month_diff_calc_toggle")
+                            .clickable { isCalculatorExpanded = !isCalculatorExpanded },
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isCalculatorExpanded) Color(0xFFEBF4FF) else Color.Transparent
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DateRange,
+                                contentDescription = "Kalkulator Selisih Bulan",
+                                tint = Color(0xFF005FAF),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Kalkulator Selisih Bulan",
+                                    fontSize = 14.5.sp,
+                                    fontWeight = if (isCalculatorExpanded) FontWeight.Bold else FontWeight.SemiBold,
+                                    color = if (isCalculatorExpanded) Color(0xFF005FAF) else Color(0xFF1E293B)
+                                )
+                                Text(
+                                    text = if (isCalculatorExpanded) {
+                                        "Ketuk untuk menyembunyikan kalkulator"
+                                    } else {
+                                        "Hitung rentang bulan & hari jatuh tempo"
+                                    },
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF64748B),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Icon(
+                                imageVector = if (isCalculatorExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (isCalculatorExpanded) "Tutup Kalkulator" else "Buka Kalkulator",
+                                tint = if (isCalculatorExpanded) Color(0xFF005FAF) else Color(0xFF64748B)
+                            )
+                        }
+                    }
+
+                    AnimatedVisibility(
+                        visible = isCalculatorExpanded,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                .background(Color(0xFFF8FAFC), RoundedCornerShape(14.dp))
+                                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(14.dp))
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        startDatePickerDialog.updateDate(
+                                            startCal.get(java.util.Calendar.YEAR),
+                                            startCal.get(java.util.Calendar.MONTH),
+                                            startCal.get(java.util.Calendar.DAY_OF_MONTH)
+                                        )
+                                        startDatePickerDialog.show()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = Color.White,
+                                        contentColor = Color(0xFF00386B)
+                                    ),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 48.dp),
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Text(
+                                            text = "Tgl / Bulan Awal",
+                                            fontSize = 10.sp,
+                                            color = Color(0xFF64748B),
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.CalendarToday,
+                                                contentDescription = null,
+                                                tint = Color(0xFF005FAF),
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Text(
+                                                text = startSelectedDateStr,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF00386B)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        endDatePickerDialog.updateDate(
+                                            endCal.get(java.util.Calendar.YEAR),
+                                            endCal.get(java.util.Calendar.MONTH),
+                                            endCal.get(java.util.Calendar.DAY_OF_MONTH)
+                                        )
+                                        endDatePickerDialog.show()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = Color.White,
+                                        contentColor = Color(0xFF00386B)
+                                    ),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 48.dp),
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Text(
+                                            text = "Bulan / Tgl Akhir",
+                                            fontSize = 10.sp,
+                                            color = Color(0xFF64748B),
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Event,
+                                                contentDescription = null,
+                                                tint = Color(0xFF005FAF),
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Text(
+                                                text = endSelectedDateStr,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF00386B)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFFEBF5FF),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF93C5FD))
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Text(
+                                        text = "Hasil Selisih Bulan",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF1E40AF)
+                                    )
+                                    Text(
+                                        text = monthDiffResult,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF005FAF)
+                                    )
+                                    if (monthDiffDetail.isNotBlank()) {
+                                        Text(
+                                            text = monthDiffDetail,
+                                            fontSize = 10.sp,
+                                            color = Color(0xFF475569)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(
+                        color = Color(0xFFF1F5F9),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Refresh / Sinkron Data", fontWeight = FontWeight.Bold)
-                }
-            }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Save,
-                    contentDescription = null,
-                    tint = Color(0xFF005FAF),
-                    modifier = Modifier.size(13.dp)
-                )
-                Spacer(modifier = Modifier.width(5.dp))
-                Text(
-                    text = "Data tersimpan di memori HP • Terakhir update: $lastSyncText",
-                    fontSize = 10.5.sp,
-                    color = Color(0xFF475569),
-                    fontWeight = FontWeight.Medium,
-                    textAlign = TextAlign.Center
-                )
-            }
-        }
+                    // 6. Refresh / Sinkron Data CTA + Cache Timestamp
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                viewModel.refreshSpreadsheetData(force = true)
+                                Toast.makeText(context, "Menyinkronkan data ke memori HP...", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 50.dp)
+                                .testTag("settings_refresh_button")
+                        ) {
+                            if (isRefreshing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Sedang Menyinkronkan...", fontWeight = FontWeight.Bold)
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Refresh Data",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Refresh / Sinkron Data", fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
 
-        // Branding & App Build (Terpisah Mandiri di Luar Kolom Kotak Akses PN)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Save,
+                                contentDescription = null,
+                                tint = Color(0xFF005FAF),
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "Terakhir update: $lastSyncText",
+                                fontSize = 10.5.sp,
+                                color = Color(0xFF64748B),
+                                fontWeight = FontWeight.Medium,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+        // Branding & App Build inside scrollable white region
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1218,6 +1162,7 @@ fun SettingsScreenView(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+        }
     }
 
     // Dialog Login PN
@@ -1238,13 +1183,14 @@ fun SettingsScreenView(
         AlertDialog(
             onDismissRequest = { showConfirmLogoff = false },
             containerColor = Color.White,
-            title = { Text("Konfirmasi Logoff", fontWeight = FontWeight.Bold) },
+            title = { Text("Konfirmasi Keluar", fontWeight = FontWeight.Bold) },
             text = { Text("Apakah Anda yakin ingin keluar dari sesi PN ini?") },
             confirmButton = {
                 Button(
                     onClick = {
                         viewModel.logoff()
                         showConfirmLogoff = false
+                        showAppPreferencesDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
                 ) {
@@ -1252,377 +1198,43 @@ fun SettingsScreenView(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showConfirmLogoff = false }) {
-                    Text("Batal")
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (showAppPreferencesDialog) {
+                        TextButton(
+                            onClick = {
+                                showConfirmLogoff = false
+                                showAppPreferencesDialog = false
+                            }
+                        ) {
+                            Text("Tutup Menu")
+                        }
+                    }
+                    TextButton(onClick = { showConfirmLogoff = false }) {
+                        Text("Batal")
+                    }
                 }
             }
         )
     }
 
     if (showAppPreferencesDialog) {
-        androidx.compose.ui.window.Dialog(
-            onDismissRequest = { showAppPreferencesDialog = false },
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
-        ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth(0.94f)
-                    .heightIn(max = 640.dp)
-                    .clip(RoundedCornerShape(16.dp)),
-                color = Color.White,
-                tonalElevation = 6.dp
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Header Popup Pengaturan Aplikasi
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = null,
-                                tint = Color(0xFF005FAF),
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Column {
-                                Text(
-                                    text = "Pengaturan Aplikasi",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF00386B)
-                                )
-                                Text(
-                                    text = "Mode Offline, Teks WA & Update Aplikasi",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF64748B)
-                                )
-                            }
-                        }
-                        IconButton(
-                            onClick = { showAppPreferencesDialog = false },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .testTag("close_app_settings_popup")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Tutup Popup Pengaturan",
-                                tint = Color(0xFF64748B)
-                            )
-                        }
-                    }
-
-                    HorizontalDivider(color = Color(0xFFE2E8F0))
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f, fill = false)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        // 1. Mode Offline
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFFF8FAFC),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(
-                                        modifier = Modifier.weight(1f),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.SdCard,
-                                            contentDescription = null,
-                                            tint = Color(0xFF005FAF),
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Column {
-                                            Text(
-                                                text = "Mode Offline",
-                                                style = MaterialTheme.typography.titleSmall,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color(0xFF00386B)
-                                            )
-                                            Text(
-                                                text = if (isOfflineModeEnabled) "Menggunakan file CSV lokal" else "Mengambil spreadsheet online",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = Color(0xFF64748B)
-                                            )
-                                        }
-                                    }
-
-                                    Switch(
-                                        checked = isOfflineModeEnabled,
-                                        onCheckedChange = { viewModel.toggleOfflineMode(it) },
-                                        modifier = Modifier.testTag("popup_offline_mode_switch")
-                                    )
-                                }
-
-                                AnimatedVisibility(visible = isOfflineModeEnabled) {
-                                    Column(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        HorizontalDivider(color = Color(0xFFE2E8F0))
-
-                                        Text(
-                                            text = "Pilih File CSV Lokal:",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF00386B)
-                                        )
-
-                                        @Composable
-                                        fun LocalFileRow(key: String, label: String, currentName: String) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
-                                                    Text(
-                                                        text = if (currentName.isNotBlank()) currentName else "Belum ada file",
-                                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
-                                                        color = if (currentName.isNotBlank()) Color(0xFF005FAF) else Color.Gray,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-                                                Button(
-                                                    onClick = {
-                                                        activeFileKey = key
-                                                        fileLauncher.launch("*/*")
-                                                    },
-                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                                    modifier = Modifier.heightIn(min = 36.dp)
-                                                ) {
-                                                    Text("Pilih", style = MaterialTheme.typography.labelSmall)
-                                                }
-                                                if (currentName.isNotBlank()) {
-                                                    IconButton(
-                                                        onClick = { viewModel.deleteOfflineFile(key) },
-                                                        modifier = Modifier.size(36.dp)
-                                                    ) {
-                                                        Icon(Icons.Default.Delete, contentDescription = "Hapus", tint = Color.Red, modifier = Modifier.size(16.dp))
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        LocalFileRow("url_1", "LW321 Bulan Lalu", offlineNameUrl1)
-                                        LocalFileRow("url_2", "LW321 Akhir Bulan", offlineNameUrl2)
-                                        LocalFileRow("url_3", "LW321 Daily", offlineNameUrl3)
-                                        LocalFileRow("url_4", "Database LW321", offlineNameUrl4)
-                                        LocalFileRow("e_url_1", "LW325 Akhir Bulan", offlineNameEUrl1)
-                                        LocalFileRow("e_url_2", "Database LW325", offlineNameEUrl2)
-                                        LocalFileRow("k_url_1", "Database Kelolaan", offlineNameKUrl1)
-                                        LocalFileRow("di319_url", "DI319", offlineNameDi319Url)
-                                        LocalFileRow("lw325_daily_url", "LW325 Daily", offlineNameLw325Daily)
-                                    }
-                                }
-                            }
-                        }
-
-                        // 2. Pengaturan Edit Teks WA
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { showEditWaDialog = true }
-                                .testTag("open_edit_wa_from_popup"),
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFFF8FAFC),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(
-                                        painter = painterResource(id = com.example.R.drawable.ic_whatsapp),
-                                        contentDescription = null,
-                                        tint = Color.Unspecified,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                    Column {
-                                        Text(
-                                            text = "Pengaturan Edit Teks WA",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF00386B)
-                                        )
-                                        Text(
-                                            text = "Edit template pesan WA Menu Rencana & Detail Debitur",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color(0xFF64748B)
-                                        )
-                                    }
-                                }
-                                IconButton(
-                                    onClick = { showEditWaDialog = true },
-                                    modifier = Modifier.size(48.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Edit,
-                                        contentDescription = "Edit Teks WA",
-                                        modifier = Modifier.size(22.dp),
-                                        tint = Color(0xFF005FAF)
-                                    )
-                                }
-                            }
-                        }
-
-                        // 3. Check for Update (di bawah Pengaturan Edit Teks WA)
-                        val isUpdateBusy = appUpdateState is AppUpdateState.Checking ||
-                            appUpdateState is AppUpdateState.Downloading ||
-                            appUpdateState is AppUpdateState.Installing
-                        Button(
-                            onClick = {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                                    !AppUpdateManager.hasNotificationPermission(context)
-                                ) {
-                                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                }
-                                when (appUpdateState) {
-                                    is AppUpdateState.NeedsInstallPermission -> {
-                                        installPermissionLauncher.launch(
-                                            AppUpdateManager.createInstallPermissionIntent(context)
-                                        )
-                                    }
-                                    is AppUpdateState.ReadyToInstall -> {
-                                        if (AppUpdateManager.canRequestPackageInstalls(context)) {
-                                            viewModel.retryInstallAfterPermissionGranted()
-                                        } else {
-                                            installPermissionLauncher.launch(
-                                                AppUpdateManager.createInstallPermissionIntent(context)
-                                            )
-                                        }
-                                    }
-                                    else -> {
-                                        hasManualUpdateCheck = true
-                                        viewModel.checkForUpdates(
-                                            autoInstallOnFind = true,
-                                            isAutoBackgroundCheck = false
-                                        )
-                                    }
-                                }
-                            },
-                            enabled = !isUpdateBusy,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF005FAF),
-                                disabledContainerColor = Color(0xFF005FAF).copy(alpha = 0.7f)
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 48.dp)
-                                .testTag("check_for_update_button")
-                        ) {
-                            when (val state = appUpdateState) {
-                                is AppUpdateState.Checking -> {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        color = Color.White,
-                                        strokeWidth = 2.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Memeriksa Pembaruan...", fontWeight = FontWeight.Bold)
-                                }
-                                is AppUpdateState.Downloading -> {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        color = Color.White,
-                                        strokeWidth = 2.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Mengunduh ${state.progressPercent}%...", fontWeight = FontWeight.Bold)
-                                }
-                                is AppUpdateState.Installing -> {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        color = Color.White,
-                                        strokeWidth = 2.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Menyiapkan Instalasi...", fontWeight = FontWeight.Bold)
-                                }
-                                is AppUpdateState.NeedsInstallPermission -> {
-                                    Icon(
-                                        imageVector = Icons.Default.SystemUpdate,
-                                        contentDescription = "Izinkan Instalasi",
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Izinkan & Instal Update", fontWeight = FontWeight.Bold)
-                                }
-                                is AppUpdateState.ReadyToInstall -> {
-                                    Icon(
-                                        imageVector = Icons.Default.SystemUpdate,
-                                        contentDescription = "Instal Pembaruan",
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Instal Update (${state.release.tagName})", fontWeight = FontWeight.Bold)
-                                }
-                                else -> {
-                                    Icon(
-                                        imageVector = Icons.Default.SystemUpdate,
-                                        contentDescription = "Check for Update",
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Check for Update", fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-
-                    Button(
-                        onClick = { showAppPreferencesDialog = false },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 48.dp)
-                    ) {
-                        Text("Tutup", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
+        SettingsMenuPopupDialog(
+            viewModel = viewModel,
+            context = context,
+            appUpdateState = appUpdateState,
+            notificationPermissionLauncher = notificationPermissionLauncher,
+            installPermissionLauncher = installPermissionLauncher,
+            onMarkManualUpdateCheck = { hasManualUpdateCheck = true },
+            onPickOfflineFile = { key ->
+                activeFileKey = key
+                fileLauncher.launch("*/*")
+            },
+            onOpenEditWa = { showEditWaDialog = true },
+            onOpenLogin = { showLoginDialog = true },
+            onConfirmLogoff = { showConfirmLogoff = true },
+            onOpenAnalytics = onOpenAnalytics,
+            onDismiss = { showAppPreferencesDialog = false }
+        )
     }
 
     if (showEditWaDialog) {

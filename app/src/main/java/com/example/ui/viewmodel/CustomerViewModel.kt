@@ -11,6 +11,7 @@ import com.example.data.model.mapEkstrakompSegmen
 import com.example.data.model.SavingsAccount
 import com.example.data.model.SimpananRow
 import com.example.data.repository.CustomerRepository
+import com.example.data.util.DateTenorUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -1176,12 +1177,6 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
 
     fun selectPeriodSource(source: String) {
         selectedPeriodSource.value = source
-        if (source.startsWith("BULAN_")) {
-            val m = source.removePrefix("BULAN_").toIntOrNull()
-            if (m != null && m in 1..12) {
-                filterBulanLunas.value = String.format("%02d", m)
-            }
-        }
         viewModelScope.launch(Dispatchers.IO) {
             val periodKey = when {
                 source == "BULAN_LALU" -> "PERIOD_BULAN_LALU"
@@ -1202,19 +1197,6 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
 
     fun setFilterBulanLunas(bulan: String) {
         filterBulanLunas.value = bulan
-        val monthNum = bulan.toIntOrNull()
-        if (monthNum != null && monthNum in 1..12) {
-            val monthUrl = lw321AllUrls[monthNum]?.value ?: ""
-            if (monthUrl.isNotBlank()) {
-                selectPeriodSource("BULAN_$monthNum")
-                return
-            }
-        } else if (bulan == "SEMUA") {
-            if (selectedPeriodSource.value.startsWith("BULAN_")) {
-                selectPeriodSource("AKHIR_BULAN")
-                return
-            }
-        }
     }
 
     fun extractDateFromCsvContent(csvContent: String): String {
@@ -1974,75 +1956,9 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         listWithAll(if (hasBlank) nonBlank + listOf("Blank PN") else nonBlank)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("SEMUA"))
 
-    fun extractMonthFromDate(dateStr: String): String? {
-        val clean = dateStr.trim()
-        if (clean.isBlank()) return null
-        
-        val lower = clean.lowercase()
-        when {
-            lower.contains("jan") -> return "01"
-            lower.contains("feb") -> return "02"
-            lower.contains("mar") -> return "03"
-            lower.contains("apr") -> return "04"
-            lower.contains("mei") || lower.contains("may") -> return "05"
-            lower.contains("jun") -> return "06"
-            lower.contains("jul") -> return "07"
-            lower.contains("agu") || lower.contains("ags") || lower.contains("aug") -> return "08"
-            lower.contains("sep") -> return "09"
-            lower.contains("okt") || lower.contains("oct") -> return "10"
-            lower.contains("nov") -> return "11"
-            lower.contains("des") || lower.contains("dec") -> return "12"
-        }
-        
-        val parts = clean.split('/', '-', '.')
-        if (parts.size >= 3) {
-            if (parts[2].length == 4 && parts[2].all { it.isDigit() }) {
-                val m = parts[1].toIntOrNull()
-                if (m != null && m in 1..12) return String.format("%02d", m)
-            }
-            if (parts[0].length == 4 && parts[0].all { it.isDigit() }) {
-                val m = parts[1].toIntOrNull()
-                if (m != null && m in 1..12) return String.format("%02d", m)
-            }
-        }
-        
-        return try {
-            if (clean.length >= 5) {
-                val mid = clean.substring(3, 5)
-                if (mid.all { it.isDigit() }) mid else null
-            } else null
-        } catch (e: Exception) {
-            null
-        }
-    }
+    fun extractMonthFromDate(dateStr: String): String? = DateTenorUtils.extractMonthFromDate(dateStr)
 
-    fun extractYearFromDate(dateStr: String): String? {
-        val clean = dateStr.trim()
-        if (clean.isBlank()) return null
-        val parts = clean.split('/', '-', '.')
-        if (parts.size >= 3) {
-            if (parts[2].length == 4 && parts[2].all { it.isDigit() }) return parts[2]
-            if (parts[0].length == 4 && parts[0].all { it.isDigit() }) return parts[0]
-        }
-        val yearRegex = "\\b(20\\d{2}|19\\d{2})\\b".toRegex()
-        val match = yearRegex.find(clean)
-        if (match != null) return match.value
-        return if (clean.length >= 4) {
-            val right4 = clean.takeLast(4)
-            if (right4.all { it.isDigit() }) right4 else null
-        } else null
-    }
-
-    // Dynamic list of unique Years based on active menu's customers tglLunas
-    val availableYears: StateFlow<List<String>> = selectedMenu.flatMapLatest { menu ->
-        val actualMenu = if (menu == "KELOLAAN") "INTRAKOMP" else menu
-        repository.getCustomersFlow(actualMenu)
-    }.combine(selectedMenu) { customers, _ ->
-        val years = customers.mapNotNull {
-            extractYearFromDate(it.tglLunas)
-        }.filter { it.length == 4 && it.all { char -> char.isDigit() } }.distinct().sorted()
-        listWithAll(years)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("SEMUA"))
+    fun extractYearFromDate(dateStr: String): String? = DateTenorUtils.extractYearFromDate(dateStr)
 
     // Dynamic list of unique NPDs based on active menu's customers
     val availableNpds: StateFlow<List<String>> = selectedMenu.flatMapLatest { menu ->
@@ -2104,8 +2020,8 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         listWithAll(desas)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("SEMUA"))
 
-    // Filtered, searched, and sorted customers list
-    val customersList: StateFlow<List<CustomerEntity>> = combine(
+    // Intermediate filtered list before Tahun Lunas & Sorting, used by both availableYears and customersList
+    private val customersFilteredBeforeTahun: StateFlow<List<CustomerEntity>> = combine(
         selectedMenu.flatMapLatest { menu ->
             if (menu == "KUNJUNGAN") {
                 combine(
@@ -2118,12 +2034,11 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             }
         },
         filtersFlow,
-        combine(sortColumn, sortDirection) { col, dir -> col to dir },
         combine(loggedInPN, selectedMenu, kunjunganKeys, activeVisitDateStr) { pn, menu, keys, date ->
             CustomerListMetadata(pn, menu, keys, date)
         },
         combine(dailyDataMap, di319Rows, tindakLanjutMap) { dMap, di319, tlMap -> Triple(dMap, di319, tlMap) }
-    ) { rawList, filterParams, sortParams, details, extraData ->
+    ) { rawList, filterParams, details, extraData ->
         val loggedInPN = details.loggedInPN
         val selectedMenu = details.selectedMenu
         val keys = details.kunjunganKeys
@@ -2143,7 +2058,6 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         val setorPokok = filterParams.setorPokok
         val tusim = filterParams.tusim
         val tucil = filterParams.tucil
-        val (sortCol, sortDir) = sortParams
         
         var filteredList = rawList
         
@@ -2482,34 +2396,8 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                     extractYearFromDate(tglPh) == bulan
                 }
             } else {
-                val monthInt = bulan.toIntOrNull()
-                val isMonthSourceLoaded = (monthInt != null && selectedPeriodSource.value == "BULAN_$monthInt")
-                if (isMonthSourceLoaded) {
-                    filteredList
-                } else {
-                    filteredList.filter {
-                        extractMonthFromDate(it.tglLunas) == bulan
-                    }
-                }
-            }
-        }
-
-        // 5. Tahun Lunas filter
-        if (tahun != "SEMUA") {
-            filteredList = if (selectedMenu == "KUNJUNGAN") {
-                filteredList.filter { item ->
-                    val itemDesa = item.extraColumns.split("||")
-                        .firstOrNull { it.startsWith("Desa::") }
-                        ?.substringAfter("Desa::")?.trim()?.uppercase() ?: ""
-                    itemDesa == tahun.uppercase()
-                }
-            } else if (selectedMenu == "EKSTRAKOMP") {
                 filteredList.filter {
-                    extractYearFromDate(it.tglReal) == tahun
-                }
-            } else {
-                filteredList.filter {
-                    extractYearFromDate(it.tglLunas) == tahun
+                    extractMonthFromDate(it.tglLunas) == bulan
                 }
             }
         }
@@ -2570,18 +2458,76 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
 
         // 8. Tenor Range filter (<6 Bulan, <12 Bulan, > 12 Bulan, 1/2 Jalan)
         if (tnVal != "SEMUA") {
-            filteredList = filteredList.filter {
-                val elapsed = getMonthsElapsedSince(it.tglReal)
-                val remaining = it.tenor - elapsed
+            val now = java.time.LocalDate.now()
+            filteredList = filteredList.filter { cust ->
+                val elapsed = DateTenorUtils.monthsElapsedSince(cust.tglReal, now)
+                val totalTenor = DateTenorUtils.effectiveTenor(cust.tenor, cust.tglReal, cust.tglLunas)
+                val remainingFromLunas = DateTenorUtils.monthsRemainingUntil(cust.tglLunas, now)
+                val remaining = remainingFromLunas ?: if (elapsed != null && totalTenor != null) {
+                    (totalTenor - elapsed).coerceAtLeast(0)
+                } else {
+                    null
+                }
                 when (tnVal) {
-                    "<6 Bulan" -> remaining < 6
-                    "<12 Bulan" -> remaining < 12
-                    "> 12 Bulan" -> elapsed > 12
+                    "<6 Bulan" -> remaining != null && remaining < 6
+                    "<12 Bulan" -> remaining != null && remaining < 12
+                    "> 12 Bulan" -> elapsed != null && elapsed > 12
                     "1/2 Jalan" -> {
-                        val limit = it.tenor * 0.5f
-                        elapsed >= limit || it.osPinjaman <= it.plafond * 0.5
+                        val halfTenorReached = elapsed != null && totalTenor != null && totalTenor > 0 && elapsed >= (totalTenor * 0.5f)
+                        val halfOsReached = cust.plafond > 0.0 && cust.osPinjaman <= (cust.plafond * 0.5)
+                        halfTenorReached || halfOsReached
                     }
                     else -> true
+                }
+            }
+        }
+
+        filteredList
+    }
+    .flowOn(Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Dynamic list of unique Years strictly reflecting the active filtered dataset's tglLunas
+    val availableYears: StateFlow<List<String>> = combine(
+        customersFilteredBeforeTahun,
+        selectedMenu
+    ) { customers, menu ->
+        if (menu == "KUNJUNGAN" || menu == "EKSTRAKOMP") {
+            listOf("SEMUA")
+        } else {
+            val years = customers.mapNotNull {
+                extractYearFromDate(it.tglLunas)
+            }.distinct().sorted()
+            listWithAll(years)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("SEMUA"))
+
+    // Filtered, searched, and sorted customers list
+    val customersList: StateFlow<List<CustomerEntity>> = combine(
+        customersFilteredBeforeTahun,
+        filterTahunLunas,
+        selectedMenu,
+        combine(sortColumn, sortDirection) { col, dir -> col to dir }
+    ) { baseList, tahun, selectedMenu, sortParams ->
+        val (sortCol, sortDir) = sortParams
+        var filteredList = baseList
+
+        // 5. Tahun Lunas filter
+        if (tahun != "SEMUA") {
+            filteredList = if (selectedMenu == "KUNJUNGAN") {
+                filteredList.filter { item ->
+                    val itemDesa = item.extraColumns.split("||")
+                        .firstOrNull { it.startsWith("Desa::") }
+                        ?.substringAfter("Desa::")?.trim()?.uppercase() ?: ""
+                    itemDesa == tahun.uppercase()
+                }
+            } else if (selectedMenu == "EKSTRAKOMP") {
+                filteredList.filter {
+                    extractYearFromDate(it.tglReal) == tahun
+                }
+            } else {
+                filteredList.filter {
+                    extractYearFromDate(it.tglLunas) == tahun
                 }
             }
         }
@@ -3116,6 +3062,20 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             filterKolekUpdate.collect { ku ->
                 if (ku != "SEMUA" && dailyDataMap.value.isEmpty()) {
                     loadDailyDataForFilter(forceRefresh = false)
+                }
+            }
+        }
+        viewModelScope.launch {
+            combine(availableYears, customersFilteredBeforeTahun, selectedMenu) { years, customers, menu ->
+                Triple(years, customers, menu)
+            }.collect { (years, customers, menu) ->
+                val curTahun = filterTahunLunas.value
+                if ((menu == "INTRAKOMP" || menu == "KELOLAAN") &&
+                    customers.isNotEmpty() &&
+                    curTahun != "SEMUA" &&
+                    curTahun !in years
+                ) {
+                    filterTahunLunas.value = "SEMUA"
                 }
             }
         }
@@ -3750,29 +3710,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun getMonthsElapsedSince(tglReal: String): Int {
-        if (tglReal.isBlank()) return 0
-        try {
-            val parts = tglReal.split("/")
-            if (parts.size >= 3) {
-                val day = parts[0].trim().toIntOrNull() ?: 1
-                val month = parts[1].trim().toIntOrNull() ?: 1
-                val year = parts[2].trim().toIntOrNull() ?: 2026
-                
-                val startCal = java.util.Calendar.getInstance().apply {
-                    set(year, month - 1, day, 0, 0, 0)
-                }
-                val nowCal = java.util.Calendar.getInstance()
-                
-                val diffYear = nowCal.get(java.util.Calendar.YEAR) - startCal.get(java.util.Calendar.YEAR)
-                val diffMonth = nowCal.get(java.util.Calendar.MONTH) - startCal.get(java.util.Calendar.MONTH)
-                
-                val elapsed = diffYear * 12 + diffMonth
-                return if (elapsed < 0) 0 else elapsed
-            }
-        } catch (e: Exception) {
-            // ignore
-        }
-        return 0
+        return DateTenorUtils.monthsElapsedSince(tglReal) ?: 0
     }
 
     fun getDistinctCustomers(map: Map<String, com.example.data.model.CustomerEntity>): List<com.example.data.model.CustomerEntity> {
