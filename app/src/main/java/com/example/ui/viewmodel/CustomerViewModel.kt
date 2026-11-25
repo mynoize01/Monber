@@ -169,9 +169,11 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         MutableStateFlow(sharedPrefs.getString("lw321_all_$month", "") ?: "")
     }
 
-    // 5 Bottom Nav Menus: "MONITORING", "KELOLAAN", "RENCANA", "DASHBOARD", "SETTING"
+    // 5 Bottom Nav Menus: "BERANDA", "KELOLAAN", "MONITORING", "DASHBOARD", "SETTING" (plus "RENCANA" sub-route from Beranda)
     val selectedBottomNav = MutableStateFlow(
-        sharedPrefs.getString("last_selected_bottom_nav", "MONITORING") ?: "MONITORING"
+        sharedPrefs.getString("last_selected_bottom_nav", "BERANDA")?.let {
+            if (it == "RENCANA") "BERANDA" else it
+        } ?: "BERANDA"
     )
     
     val isOfflineModeEnabled = MutableStateFlow(sharedPrefs.getBoolean("is_offline_mode_enabled", false))
@@ -183,6 +185,12 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     val appUpdateState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
     val showUpdateDialog = MutableStateFlow(false)
     private var updateJob: kotlinx.coroutines.Job? = null
+    private var lastAutoUpdateCheckMs: Long = 0L
+    private var lastAutoUpdateCheckSucceeded: Boolean = false
+    private var isAutoUpdateCheckRunning: Boolean = false
+    private var dismissedUpdateVersionTag: String? = null
+    private val autoUpdateCheckSuccessCooldownMs: Long = 15 * 60 * 1000L
+    private val autoUpdateCheckFailureRetryMs: Long = 10_000L
     val offlineNameUrl1 = MutableStateFlow(sharedPrefs.getString("offline_name_url_1", "") ?: "")
     val offlineNameUrl2 = MutableStateFlow(sharedPrefs.getString("offline_name_url_2", "") ?: "")
     val offlineNameUrl3 = MutableStateFlow(sharedPrefs.getString("offline_name_url_3", "") ?: "")
@@ -413,6 +421,15 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         selectedBottomNav.value = menu
         sharedPrefs.edit().putString("last_selected_bottom_nav", menu).apply()
         when (menu) {
+            "BERANDA" -> {
+                loadAllMonthlyChartData()
+                if (summaryDaily.value.debtors == 0) {
+                    loadSummaryForPeriod("DAILY")
+                }
+                if (summaryAkhirBulan.value.debtors == 0) {
+                    loadSummaryForPeriod("AKHIR_BULAN")
+                }
+            }
             "MONITORING" -> {
                 val current = selectedMenu.value
                 if (current !in listOf("INTRAKOMP", "EKSTRAKOMP", "SIMPANAN")) {
@@ -815,6 +832,77 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                     dashboardMonthlyMantriSummary.value = dashboardMonthlyMantriSummary.value + (m to mantriData)
                     persistCurrentSummaries()
                 }
+            }
+        }
+    }
+
+    private val isLoadingMonthlyChart = MutableStateFlow(false)
+
+    fun loadAllMonthlyChartData(forceRefresh: Boolean = false) {
+        if (isLoadingMonthlyChart.value && !forceRefresh) return
+        viewModelScope.launch(Dispatchers.IO) {
+            isLoadingMonthlyChart.value = true
+            try {
+                val isOffline = isOfflineModeEnabled.value
+                val hasNetwork = isOffline || repository.isNetworkAvailable(getApplication())
+                val updatedSummary = dashboardMonthlySummary.value.toMutableMap()
+                val updatedKolek = dashboardMonthlyKolekSummary.value.toMutableMap()
+                val updatedMantri = dashboardMonthlyMantriSummary.value.toMutableMap()
+                var changed = false
+
+                for (m in 1..12) {
+                    if (!forceRefresh && updatedSummary.containsKey(m) && updatedKolek.containsKey(m)) {
+                        continue
+                    }
+
+                    val cachedRoomMonth = if (!forceRefresh) {
+                        repository.getCachedPeriodCustomers("PERIOD_LW321_ALL_$m")
+                    } else emptyList()
+
+                    if (cachedRoomMonth.isNotEmpty()) {
+                        updatedSummary[m] = UnitSummaryData(
+                            os = cachedRoomMonth.sumOf { it.osPinjaman },
+                            debtors = cachedRoomMonth.size
+                        )
+                        updatedKolek[m] = calculateKolekSummary(cachedRoomMonth)
+                        updatedMantri[m] = calculateMantriSummaries(cachedRoomMonth)
+                        changed = true
+                        continue
+                    }
+
+                    if (!hasNetwork) continue
+
+                    val url = lw321AllUrls[m]?.value ?: ""
+                    val offlineContent = if (isOffline) {
+                        getOfflineFileContent("lw321_all_$m")
+                    } else null
+
+                    if (url.isNotBlank() || !offlineContent.isNullOrBlank()) {
+                        val monthMap = repository.getDailyInfo(if (isOffline) null else url, offlineContent)
+                        val uniqueMonth = getDistinctCustomers(monthMap)
+                        if (uniqueMonth.isNotEmpty()) {
+                            repository.savePeriodCustomers("PERIOD_LW321_ALL_$m", uniqueMonth)
+                            updatedSummary[m] = UnitSummaryData(
+                                os = uniqueMonth.sumOf { it.osPinjaman },
+                                debtors = uniqueMonth.size
+                            )
+                            updatedKolek[m] = calculateKolekSummary(uniqueMonth)
+                            updatedMantri[m] = calculateMantriSummaries(uniqueMonth)
+                            changed = true
+                        }
+                    }
+                }
+
+                if (changed) {
+                    dashboardMonthlySummary.value = updatedSummary
+                    dashboardMonthlyKolekSummary.value = updatedKolek
+                    dashboardMonthlyMantriSummary.value = updatedMantri
+                    persistCurrentSummaries()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("CustomerViewModel", "Failed to batch load 12-month chart data", e)
+            } finally {
+                isLoadingMonthlyChart.value = false
             }
         }
     }
@@ -3104,7 +3192,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         if (githubUpdateRepo.value.isBlank()) {
             saveGithubUpdateRepo("https://github.com/mynoize01/Monber.git")
         }
-        checkForUpdates(autoInstallOnFind = false, isAutoBackgroundCheck = true)
+        checkForUpdatesOnAppStart()
     }
 
     fun loadDailyDataForFilter(forceRefresh: Boolean = false) {
@@ -3898,10 +3986,15 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun openUpdateDialog() {
+        dismissedUpdateVersionTag = null
         showUpdateDialog.value = true
     }
 
     fun dismissUpdateDialog() {
+        val current = appUpdateState.value
+        if (current is AppUpdateState.UpdateAvailable) {
+            dismissedUpdateVersionTag = current.release.tagName.ifBlank { current.release.versionName }
+        }
         showUpdateDialog.value = false
     }
 
@@ -3913,6 +4006,43 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         ) {
             appUpdateState.value = AppUpdateState.Idle
         }
+    }
+
+    fun checkForUpdatesOnAppStart() {
+        val curState = appUpdateState.value
+        if (curState is AppUpdateState.Checking ||
+            curState is AppUpdateState.Downloading ||
+            curState is AppUpdateState.Installing ||
+            curState is AppUpdateState.ReadyToInstall ||
+            curState is AppUpdateState.NeedsInstallPermission ||
+            isAutoUpdateCheckRunning
+        ) {
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastAutoUpdateCheckMs
+
+        if (curState is AppUpdateState.UpdateAvailable) {
+            val releaseKey = curState.release.tagName.ifBlank { curState.release.versionName }
+            if (dismissedUpdateVersionTag != releaseKey) {
+                showUpdateDialog.value = true
+            }
+            if (lastAutoUpdateCheckSucceeded && elapsed < autoUpdateCheckSuccessCooldownMs) {
+                return
+            }
+        } else {
+            val minInterval = if (lastAutoUpdateCheckSucceeded) {
+                autoUpdateCheckSuccessCooldownMs
+            } else {
+                autoUpdateCheckFailureRetryMs
+            }
+            if (lastAutoUpdateCheckMs > 0L && elapsed < minInterval) {
+                return
+            }
+        }
+
+        checkForUpdates(autoInstallOnFind = false, isAutoBackgroundCheck = true)
     }
 
     fun checkForUpdates(
@@ -3931,39 +4061,66 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         ) {
             return
         }
+        if (isAutoBackgroundCheck && isAutoUpdateCheckRunning) {
+            return
+        }
 
         updateJob?.cancel()
+        if (isAutoBackgroundCheck) {
+            isAutoUpdateCheckRunning = true
+            lastAutoUpdateCheckMs = System.currentTimeMillis()
+        } else {
+            isAutoUpdateCheckRunning = false
+            dismissedUpdateVersionTag = null
+        }
+
         updateJob = viewModelScope.launch {
-            if (!isAutoBackgroundCheck) {
-                appUpdateState.value = AppUpdateState.Checking
-            }
-            val result = AppUpdateManager.fetchLatestRelease(repo)
-            result.onSuccess { release ->
-                val appContext = getApplication<Application>()
-                val currentVersion = AppUpdateManager.getCurrentVersionName(appContext)
-                val currentVersionCode = AppUpdateManager.getCurrentVersionCode(appContext)
-                if (AppUpdateManager.isNewerUpdate(release, currentVersion, currentVersionCode)) {
+            try {
+                if (!isAutoBackgroundCheck) {
+                    appUpdateState.value = AppUpdateState.Checking
+                }
+                val result = AppUpdateManager.fetchLatestRelease(repo)
+                result.onSuccess { release ->
+                    lastAutoUpdateCheckSucceeded = true
+                    lastAutoUpdateCheckMs = System.currentTimeMillis()
+                    val appContext = getApplication<Application>()
+                    val currentVersion = AppUpdateManager.getCurrentVersionName(appContext)
+                    val currentVersionCode = AppUpdateManager.getCurrentVersionCode(appContext)
+                    if (AppUpdateManager.isNewerUpdate(release, currentVersion, currentVersionCode)) {
+                        val releaseKey = release.tagName.ifBlank { release.versionName }
+                        if (isAutoBackgroundCheck) {
+                            AppUpdateManager.showUpdateNotification(appContext, release)
+                        }
+                        if (!isAutoBackgroundCheck || dismissedUpdateVersionTag != releaseKey) {
+                            showUpdateDialog.value = true
+                        }
+                        if (autoInstallOnFind && !release.apkDownloadUrl.isNullOrBlank()) {
+                            startDownloadAndInstallInternal(release)
+                        } else {
+                            appUpdateState.value = AppUpdateState.UpdateAvailable(release)
+                        }
+                    } else {
+                        appUpdateState.value = if (isAutoBackgroundCheck) {
+                            AppUpdateState.Idle
+                        } else {
+                            AppUpdateState.UpToDate(currentVersion)
+                        }
+                    }
+                }.onFailure { error ->
+                    lastAutoUpdateCheckSucceeded = false
                     if (isAutoBackgroundCheck) {
-                        AppUpdateManager.showUpdateNotification(appContext, release)
-                    }
-                    showUpdateDialog.value = true
-                    if (autoInstallOnFind && !release.apkDownloadUrl.isNullOrBlank()) {
-                        startDownloadAndInstallInternal(release)
+                        if (appUpdateState.value !is AppUpdateState.UpdateAvailable) {
+                            appUpdateState.value = AppUpdateState.Idle
+                        }
                     } else {
-                        appUpdateState.value = AppUpdateState.UpdateAvailable(release)
-                    }
-                } else {
-                    appUpdateState.value = if (isAutoBackgroundCheck) {
-                        AppUpdateState.Idle
-                    } else {
-                        AppUpdateState.UpToDate(currentVersion)
+                        appUpdateState.value = AppUpdateState.Error(
+                            error.message ?: "Gagal memeriksa pembaruan dari GitHub."
+                        )
                     }
                 }
-            }.onFailure { error ->
-                appUpdateState.value = if (isAutoBackgroundCheck) {
-                    AppUpdateState.Idle
-                } else {
-                    AppUpdateState.Error(error.message ?: "Gagal memeriksa pembaruan dari GitHub.")
+            } finally {
+                if (isAutoBackgroundCheck) {
+                    isAutoUpdateCheckRunning = false
                 }
             }
         }

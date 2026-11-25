@@ -319,17 +319,20 @@ fun SettingsScreenView(
         appUpdateState is AppUpdateState.ReadyToInstall ||
         appUpdateState is AppUpdateState.NeedsInstallPermission
 
+    val statusBarTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(Color.White)
     ) {
-        // Pinned Curved BRI Blue-to-White Wave Header (full-bleed left, right & top)
+        // Pinned Curved BRI Blue-to-White Wave Header (full-bleed left, right & top behind status bar)
         SettingsWaveProfileHeader(
             displayName = headerDisplayName,
             subtitle = headerSubtitle,
             onProfileClick = { showLoginDialog = true },
             seamlessTopBlend = true,
+            topInset = statusBarTopPadding,
             endCornerContent = {
                 IconButton(
                     onClick = { showAppPreferencesDialog = true },
@@ -358,6 +361,16 @@ fun SettingsScreenView(
                 }
             }
         )
+
+        if (isRefreshing) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.5.dp),
+                color = Color(0xFF005FAF),
+                trackColor = Color(0xFFE0ECFA)
+            )
+        }
 
         // Scrollable Content from Blue Wave Boundary Downward
         Column(

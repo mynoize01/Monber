@@ -65,31 +65,44 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Header search trigger: bold orange U-shaped hanging pocket button
- * attached flush to the top edge of the header.
+ * Header search trigger: clean icon button over the blue wave header.
  */
 @Composable
 fun HeaderPocketSearchButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    pocketColor: Color = Color(0xFFF97316),
+    pocketColor: Color = Color.Transparent,
     iconTint: Color = Color.White
 ) {
     val interactionSource = remember { MutableInteractionSource() }
-    val pocketShape = RoundedCornerShape(
-        topStart = 0.dp,
-        topEnd = 0.dp,
-        bottomStart = 22.dp,
-        bottomEnd = 22.dp
-    )
+    val useTransparent = pocketColor.alpha == 0f
+    val buttonShape = if (useTransparent) {
+        androidx.compose.foundation.shape.CircleShape
+    } else {
+        RoundedCornerShape(
+            topStart = 0.dp,
+            topEnd = 0.dp,
+            bottomStart = 22.dp,
+            bottomEnd = 22.dp
+        )
+    }
 
     Box(
         modifier = modifier
-            .width(44.dp)
-            .height(42.dp)
-            .shadow(4.dp, pocketShape)
-            .clip(pocketShape)
-            .background(color = pocketColor, shape = pocketShape)
+            .then(
+                if (useTransparent) {
+                    Modifier
+                        .size(48.dp)
+                        .clip(buttonShape)
+                } else {
+                    Modifier
+                        .width(44.dp)
+                        .height(42.dp)
+                        .shadow(4.dp, buttonShape)
+                        .clip(buttonShape)
+                        .background(color = pocketColor, shape = buttonShape)
+                }
+            )
             .clickable(
                 interactionSource = interactionSource,
                 indication = ripple(bounded = true, color = Color.White),
@@ -103,9 +116,7 @@ fun HeaderPocketSearchButton(
             imageVector = Icons.Default.Search,
             contentDescription = "Cari Nasabah",
             tint = iconTint,
-            modifier = Modifier
-                .padding(top = 2.dp)
-                .size(22.dp)
+            modifier = Modifier.size(if (useTransparent) 25.dp else 22.dp)
         )
     }
 }
@@ -122,8 +133,8 @@ fun HeaderPocketSearchBar(
     focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
     pillColor: Color = Color(0xFFFFFBF7),
-    pocketColor: Color = Color(0xFFF97316),
-    iconTint: Color = Color.White,
+    pocketColor: Color = Color.Transparent,
+    iconTint: Color = Color(0xFF005FAF),
     textColor: Color = Color(0xFF001C3B),
     hintColor: Color = Color(0xFF64748B)
 ) {
@@ -204,22 +215,34 @@ fun HeaderPocketSearchBar(
                 }
             }
 
-            // Hanging U-shaped accent pocket tab on the right (Reference Image 1)
+            // Clean search trigger icon on right side of search pill (without orange pocket fill)
+            val useTransparentPocket = pocketColor.alpha == 0f
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(end = 8.dp, top = 1.dp)
-                    .width(36.dp)
-                    .height(30.dp)
-                    .shadow(4.dp, RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 18.dp, bottomEnd = 18.dp))
-                    .background(
-                        color = pocketColor,
-                        shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
+                    .then(
+                        if (useTransparentPocket) {
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(end = 8.dp, bottom = 2.dp)
+                                .size(30.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                        } else {
+                            Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(end = 8.dp, top = 1.dp)
+                                .width(36.dp)
+                                .height(30.dp)
+                                .shadow(4.dp, RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 18.dp, bottomEnd = 18.dp))
+                                .background(
+                                    color = pocketColor,
+                                    shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
+                                )
+                        }
                     )
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
-                        indication = ripple(bounded = false, radius = 20.dp, color = Color.White),
-                        onClick = { focusRequester.requestFocus() }
+                        indication = ripple(bounded = false, radius = 20.dp, color = iconTint),
+                        onClick = { runCatching { focusRequester.requestFocus() } }
                     ),
                 contentAlignment = Alignment.Center
             ) {

@@ -74,6 +74,7 @@ sealed class AppUpdateState {
 object AppUpdateManager {
     private const val CHANNEL_ID = "monber_app_updates"
     private const val NOTIFICATION_ID = 9001
+    private const val POST_UPDATE_NOTIFICATION_ID = 9002
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(25, TimeUnit.SECONDS)
@@ -423,6 +424,8 @@ object AppUpdateManager {
                             "Accept",
                             if (isGitHubApi) "application/vnd.github+json" else "application/json"
                         )
+                        .header("Cache-Control", "no-cache")
+                        .header("Pragma", "no-cache")
                         .header("User-Agent", "MonBer-Android-Updater")
                         .build()
 
@@ -816,5 +819,72 @@ object AppUpdateManager {
             .build()
 
         notificationManager.notify(NOTIFICATION_ID, notification)
+    }
+
+    fun launchAppAfterUpdate(context: Context, fromReceiver: Boolean = false) {
+        val notificationManager =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        notificationManager?.cancel(NOTIFICATION_ID)
+
+        runCatching {
+            val updatesDir = File(context.cacheDir, "updates")
+            if (updatesDir.exists()) {
+                updatesDir.listFiles()?.forEach { it.delete() }
+            }
+        }
+
+        val launchIntent = (context.packageManager.getLaunchIntentForPackage(context.packageName)
+            ?: Intent(context, MainActivity::class.java)).apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+            )
+            putExtra("just_updated", true)
+        }
+
+        val started = runCatching {
+            context.startActivity(launchIntent)
+            true
+        }.getOrDefault(false)
+
+        if (fromReceiver && hasNotificationPermission(context) && notificationManager != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID,
+                    "Pembaruan Aplikasi",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Notifikasi saat pembaruan aplikasi selesai dipasang"
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                9002,
+                launchIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val updatedNotif = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle("MonBer Diperbarui (v${BuildConfig.VERSION_NAME})")
+                .setContentText(
+                    if (started) "Pembaruan selesai. Ketuk untuk membuka aplikasi."
+                    else "Pembaruan berhasil dipasang. Ketuk untuk membuka MonBer."
+                )
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .build()
+            notificationManager.notify(POST_UPDATE_NOTIFICATION_ID, updatedNotif)
+        }
+    }
+
+    fun dismissPostUpdateNotification(context: Context) {
+        val notificationManager =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        notificationManager?.cancel(NOTIFICATION_ID)
+        notificationManager?.cancel(POST_UPDATE_NOTIFICATION_ID)
     }
 }

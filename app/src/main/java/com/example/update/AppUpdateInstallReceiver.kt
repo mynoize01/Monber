@@ -56,6 +56,7 @@ class AppUpdateInstallReceiver : BroadcastReceiver() {
 
             PackageInstaller.STATUS_SUCCESS -> {
                 _events.tryEmit(PackageInstallEvent.Succeeded)
+                AppUpdateManager.launchAppAfterUpdate(context, fromReceiver = true)
             }
 
             PackageInstaller.STATUS_FAILURE_ABORTED -> {
@@ -107,5 +108,13 @@ class AppUpdateInstallReceiver : BroadcastReceiver() {
     companion object {
         private val _events = MutableSharedFlow<PackageInstallEvent>(extraBufferCapacity = 8)
         val events: SharedFlow<PackageInstallEvent> = _events.asSharedFlow()
+    }
+}
+
+class PostUpdateLaunchReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            AppUpdateManager.launchAppAfterUpdate(context, fromReceiver = true)
+        }
     }
 }

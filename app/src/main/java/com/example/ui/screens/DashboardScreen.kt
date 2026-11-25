@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -32,13 +33,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.zIndex
@@ -72,6 +79,7 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import com.example.R
+import com.example.ui.components.BriWaveHeaderBackground
 import com.example.ui.components.CurvedAnimatedBottomBar
 import com.example.ui.components.HeaderPocketSearchBar
 import com.example.ui.components.HeaderPocketSearchButton
@@ -524,7 +532,8 @@ fun DashboardScreen(
     val globalSearchFocusRequester = remember { FocusRequester() }
     LaunchedEffect(showGlobalSearchPopup) {
         if (showGlobalSearchPopup) {
-            globalSearchFocusRequester.requestFocus()
+            delay(80L)
+            runCatching { globalSearchFocusRequester.requestFocus() }
         }
     }
     BackHandler(enabled = showGlobalSearchPopup) {
@@ -606,9 +615,20 @@ fun DashboardScreen(
     val simpananSortColumn by viewModel.simpananSortColumn.collectAsState()
     val simpananSortDirection by viewModel.simpananSortDirection.collectAsState()
     val selectedBottomNav by viewModel.selectedBottomNav.collectAsState()
-    var visualBottomNav by remember { mutableStateOf(selectedBottomNav) }
+    var visualBottomNav by remember {
+        mutableStateOf(if (selectedBottomNav == "RENCANA") "BERANDA" else selectedBottomNav)
+    }
     LaunchedEffect(selectedBottomNav) {
-        visualBottomNav = selectedBottomNav
+        visualBottomNav = if (selectedBottomNav == "RENCANA") "BERANDA" else selectedBottomNav
+    }
+    BackHandler(
+        enabled = selectedBottomNav == "RENCANA" &&
+            !showGlobalSearchPopup &&
+            showDetailDialogForCustomer == null &&
+            !showSettingsDialog &&
+            !showLoginDialog
+    ) {
+        viewModel.setBottomNav("BERANDA")
     }
     var navSwitchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -641,6 +661,19 @@ fun DashboardScreen(
         }
     }
 
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                viewModel.checkForUpdatesOnAppStart()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     val calendarInstance = remember { java.util.Calendar.getInstance() }
     val datePickerDialog = remember {
         android.app.DatePickerDialog(
@@ -668,9 +701,9 @@ fun DashboardScreen(
             bottomBar = {
                 val navItems = remember {
                     listOf(
-                        BottomNavItemData("MONITORING", "Monitoring", Icons.Filled.Monitor, Icons.Outlined.Monitor),
+                        BottomNavItemData("BERANDA", "Beranda", Icons.Filled.Home, Icons.Outlined.Home),
                         BottomNavItemData("KELOLAAN", "Kelolaan", Icons.Filled.People, Icons.Outlined.People),
-                        BottomNavItemData("RENCANA", "Rencana", Icons.Filled.EventNote, Icons.Outlined.EventNote),
+                        BottomNavItemData("MONITORING", "Monitoring", Icons.Filled.Monitor, Icons.Outlined.Monitor),
                         BottomNavItemData("DASHBOARD", "Dashboard", Icons.Filled.Dashboard, Icons.Outlined.Dashboard),
                         BottomNavItemData("SETTING", "Setting", Icons.Filled.Settings, Icons.Outlined.Settings)
                     )
@@ -683,79 +716,105 @@ fun DashboardScreen(
                         visualBottomNav = targetNav
                         navSwitchJob?.cancel()
                         navSwitchJob = coroutineScope.launch {
-                            kotlinx.coroutines.delay(145L)
+                            kotlinx.coroutines.delay(85L)
                             viewModel.setBottomNav(targetNav)
                         }
                     }
                 )
             }
         ) { innerPadding ->
+        val isBerandaScreen = selectedBottomNav == "BERANDA"
+        val isSettingScreen = selectedBottomNav == "SETTING"
+        val isFullBleedHero = isBerandaScreen || isSettingScreen
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(bottom = innerPadding.calculateBottomPadding())
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            // Slim custom header with top-attached orange pocket search button
+            androidx.compose.animation.AnimatedVisibility(
+                visible = !isFullBleedHero,
+                enter = fadeIn(tween(220, easing = FastOutSlowInEasing)) +
+                    expandVertically(expandFrom = Alignment.Top, animationSpec = tween(240, easing = FastOutSlowInEasing)),
+                exit = fadeOut(tween(150)) +
+                    shrinkVertically(shrinkTowards = Alignment.Top, animationSpec = tween(200, easing = FastOutSlowInEasing))
+            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+            // Unstretched normal Setting wave background clipped cleanly at the header bottom border
+            val statusBarTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF005FAF)) // Corporate Blue Header Background
-                    .padding(horizontal = 16.dp)
+                    .clipToBounds()
             ) {
-                AnimatedContent(
-                    targetState = showGlobalSearchPopup,
-                    transitionSpec = {
-                        (fadeIn(animationSpec = tween(200)) + scaleIn(
-                            initialScale = 0.96f,
-                            animationSpec = tween(220)
-                        )) togetherWith fadeOut(animationSpec = tween(150))
-                    },
-                    label = "header_search_transition"
-                ) { isSearchExpanded ->
-                    if (isSearchExpanded) {
-                        HeaderPocketSearchBar(
-                            query = globalSearchQuery,
-                            onQueryChange = { globalSearchQuery = it },
-                            onClose = {
-                                showGlobalSearchPopup = false
-                                globalSearchQuery = ""
-                                keyboardController?.hide()
-                            },
-                            focusRequester = globalSearchFocusRequester,
-                            modifier = Modifier.padding(vertical = 6.dp)
-                        )
-                    } else {
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            Column(
-                                modifier = Modifier
-                                    .align(Alignment.CenterStart)
-                                    .padding(vertical = 6.dp)
-                                    .padding(end = 54.dp),
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                androidx.compose.foundation.Image(
-                                    painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.monber9),
-                                    contentDescription = "Logo MonBer",
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                BriWaveHeaderBackground(
+                    modifier = Modifier.matchParentSize(),
+                    seamlessTopBlend = true,
+                    bottomCurveColor = Color.White,
+                    referenceHeight = 142.dp + statusBarTopPadding
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp)
+                        .padding(top = 4.dp, bottom = 8.dp)
+                ) {
+                    AnimatedContent(
+                        targetState = showGlobalSearchPopup,
+                        transitionSpec = {
+                            (fadeIn(animationSpec = tween(200)) + scaleIn(
+                                initialScale = 0.96f,
+                                animationSpec = tween(220)
+                            )) togetherWith fadeOut(animationSpec = tween(150))
+                        },
+                        label = "header_search_transition"
+                    ) { isSearchExpanded ->
+                        if (isSearchExpanded) {
+                            HeaderPocketSearchBar(
+                                query = globalSearchQuery,
+                                onQueryChange = { globalSearchQuery = it },
+                                onClose = {
+                                    showGlobalSearchPopup = false
+                                    globalSearchQuery = ""
+                                    keyboardController?.hide()
+                                },
+                                focusRequester = globalSearchFocusRequester,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                        } else {
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                Column(
                                     modifier = Modifier
-                                        .height(28.dp)
-                                        .wrapContentWidth()
-                                )
-                                Spacer(modifier = Modifier.height(1.dp))
-                                Text(
-                                    text = "By nUbiin__",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp),
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color.White.copy(alpha = 0.85f),
-                                    maxLines = 1
+                                        .align(Alignment.CenterStart)
+                                        .padding(vertical = 4.dp)
+                                        .padding(end = 56.dp),
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    androidx.compose.foundation.Image(
+                                        painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.monber9),
+                                        contentDescription = "Logo MonBer",
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                                        modifier = Modifier
+                                            .height(30.dp)
+                                            .wrapContentWidth()
+                                    )
+                                    Spacer(modifier = Modifier.height(1.dp))
+                                    Text(
+                                        text = "By nUbiin__",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp),
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color.White.copy(alpha = 0.88f),
+                                        maxLines = 1
+                                    )
+                                }
+
+                                HeaderPocketSearchButton(
+                                    onClick = { showGlobalSearchPopup = true },
+                                    modifier = Modifier.align(Alignment.TopEnd)
                                 )
                             }
-
-                            HeaderPocketSearchButton(
-                                onClick = { showGlobalSearchPopup = true },
-                                modifier = Modifier.align(Alignment.TopEnd)
-                            )
                         }
                     }
                 }
@@ -768,14 +827,9 @@ fun DashboardScreen(
                     trackColor = Color(0xFF005FAF)
                 )
             } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .background(
-                            if (selectedBottomNav == "SETTING") Color(0xFF005FAF)
-                            else Color.White.copy(alpha = 0.2f)
-                        )
+                HorizontalDivider(
+                    thickness = 1.dp,
+                    color = Color(0xFF004B96).copy(alpha = 0.22f)
                 )
             }
 
@@ -885,20 +939,68 @@ fun DashboardScreen(
                     }
                 }
             }
+            }
+            }
 
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                val activeSection = when (selectedBottomNav) {
-                    "DASHBOARD" -> "DASHBOARD"
-                    "SETTING" -> "SETTING"
-                    else -> "DATA"
+                fun navOrderIndex(nav: String): Int = when (nav) {
+                    "BERANDA" -> 0
+                    "RENCANA" -> 1
+                    "KELOLAAN" -> 2
+                    "MONITORING" -> 3
+                    "DASHBOARD" -> 4
+                    "SETTING" -> 5
+                    else -> 2
                 }
-                Crossfade(
-                    targetState = activeSection,
-                    animationSpec = tween(durationMillis = 160),
-                    label = "main_section_crossfade"
-                ) { section ->
+                AnimatedContent(
+                    targetState = selectedBottomNav,
+                    transitionSpec = {
+                        val isForward = navOrderIndex(targetState) >= navOrderIndex(initialState)
+                        (slideInHorizontally(
+                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+                            initialOffsetX = { fullWidth ->
+                                val dist = (fullWidth * 0.16f).roundToInt()
+                                if (isForward) dist else -dist
+                            }
+                        ) + fadeIn(
+                            animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)
+                        ) + scaleIn(
+                            initialScale = 0.985f,
+                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
+                        )) togetherWith (slideOutHorizontally(
+                            animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+                            targetOffsetX = { fullWidth ->
+                                val dist = (fullWidth * 0.12f).roundToInt()
+                                if (isForward) -dist else dist
+                            }
+                        ) + fadeOut(
+                            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
+                        ) + scaleOut(
+                            targetScale = 0.985f,
+                            animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)
+                        )) using SizeTransform(clip = true)
+                    },
+                    label = "main_nav_transition"
+                ) { currentNav ->
                 Column(modifier = Modifier.fillMaxSize()) {
-                    when (section) {
+                    when (currentNav) {
+                        "BERANDA" -> {
+                            BerandaScreenView(
+                                viewModel = viewModel,
+                                formatter = formatter,
+                                onOpenGlobalSearch = {
+                                    globalSearchQuery = ""
+                                    showGlobalSearchPopup = true
+                                },
+                                onOpenKelolaan = { viewModel.setBottomNav("KELOLAAN") },
+                                onOpenKunjungan = { viewModel.setBottomNav("RENCANA") },
+                                onOpenMonitoring = { viewModel.setBottomNav("MONITORING") },
+                                onOpenDashboard = { viewModel.setBottomNav("DASHBOARD") },
+                                onOpenLogin = { showLoginDialog = true },
+                                onOpenUpdateDialog = { viewModel.openUpdateDialog() },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                         "DASHBOARD" -> {
                             DashboardUnitView(
                                 viewModel = viewModel,
@@ -915,13 +1017,13 @@ fun DashboardScreen(
                             )
                         }
                 else -> {
-                    if (selectedBottomNav == "MONITORING") {
+                    if (currentNav == "MONITORING") {
                         TabsHeader(
                             selectedMenu = selectedMenu,
                             onMenuSelect = { viewModel.selectMenu(it) },
                             isMonitoringOnly = true
                         )
-                    } else if (selectedBottomNav == "KELOLAAN") {
+                    } else if (currentNav == "KELOLAAN") {
                         val kelolaanTotalOs = remember(customersList) { customersList.sumOf { it.osPinjaman } }
                         KelolaanHeaderBanner(
                             loggedInPN = loggedInPN,
@@ -931,14 +1033,15 @@ fun DashboardScreen(
                             formatter = formatter,
                             onLoginClick = { showLoginDialog = true }
                         )
-                    } else if (selectedBottomNav == "RENCANA") {
+                    } else if (currentNav == "RENCANA") {
                         val activeDateFull = if (filterBulanLunas == "SEMUA" || filterBulanLunas.isBlank() || filterBulanLunas.length != 10) {
                             java.text.SimpleDateFormat("dd/MM/yyyy", Locale("id", "ID")).format(java.util.Date())
                         } else {
                             filterBulanLunas
                         }
                         RencanaHeaderBanner(
-                            activeVisitDate = activeDateFull
+                            activeVisitDate = activeDateFull,
+                            onBackClick = { viewModel.setBottomNav("BERANDA") }
                         )
                     }
 
@@ -1024,7 +1127,7 @@ fun DashboardScreen(
                             onClearClick = {
                                 viewModel.searchQuery.value = ""
                                 coroutineScope.launch {
-                                    searchFocusRequester.requestFocus()
+                                    runCatching { searchFocusRequester.requestFocus() }
                                     keyboardController?.show()
                                 }
                             },
@@ -1956,6 +2059,49 @@ fun DashboardScreen(
 }
                 }
 
+    if (isSettingScreen) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .zIndex(20f)
+        ) {
+            AnimatedContent(
+                targetState = showGlobalSearchPopup,
+                transitionSpec = {
+                    (fadeIn(animationSpec = tween(200)) + scaleIn(
+                        initialScale = 0.96f,
+                        animationSpec = tween(220)
+                    )) togetherWith fadeOut(animationSpec = tween(150))
+                },
+                label = "setting_header_search_transition"
+            ) { isSearchExpanded ->
+                if (isSearchExpanded) {
+                    HeaderPocketSearchBar(
+                        query = globalSearchQuery,
+                        onQueryChange = { globalSearchQuery = it },
+                        onClose = {
+                            showGlobalSearchPopup = false
+                            globalSearchQuery = ""
+                            keyboardController?.hide()
+                        },
+                        focusRequester = globalSearchFocusRequester,
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    )
+                } else {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        HeaderPocketSearchButton(
+                            onClick = { showGlobalSearchPopup = true },
+                            modifier = Modifier.align(Alignment.TopEnd)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     androidx.compose.animation.AnimatedVisibility(
         visible = showGlobalSearchPopup,
         enter = fadeIn(tween(180)) + expandVertically(expandFrom = Alignment.Top, animationSpec = tween(220)),
@@ -1964,20 +2110,103 @@ fun DashboardScreen(
             .align(Alignment.TopCenter)
             .zIndex(99f)
     ) {
-        GlobalSearchPopup(
-            query = globalSearchQuery,
-            onQueryChange = { globalSearchQuery = it },
-            allCustomers = allCustomers,
-            formatter = formatter,
-            onCustomerClick = { customer ->
-                showDetailDialogForCustomer = customer
-            },
-            onDismiss = {
-                showGlobalSearchPopup = false
-                globalSearchQuery = ""
-            },
-            showInputField = false
-        )
+        if (isBerandaScreen) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.35f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        showGlobalSearchPopup = false
+                        globalSearchQuery = ""
+                    }
+                    .statusBarsPadding()
+                    .padding(top = 12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {}
+                ) {
+                    GlobalSearchPopup(
+                        query = globalSearchQuery,
+                        onQueryChange = { globalSearchQuery = it },
+                        allCustomers = allCustomers,
+                        formatter = formatter,
+                        onCustomerClick = { customer ->
+                            showDetailDialogForCustomer = customer
+                        },
+                        onDismiss = {
+                            showGlobalSearchPopup = false
+                            globalSearchQuery = ""
+                        },
+                        showInputField = true,
+                        focusRequester = globalSearchFocusRequester
+                    )
+                }
+            }
+        } else if (isSettingScreen) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.28f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        showGlobalSearchPopup = false
+                        globalSearchQuery = ""
+                        keyboardController?.hide()
+                    }
+                    .statusBarsPadding()
+                    .padding(top = 52.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {}
+                ) {
+                    GlobalSearchPopup(
+                        query = globalSearchQuery,
+                        onQueryChange = { globalSearchQuery = it },
+                        allCustomers = allCustomers,
+                        formatter = formatter,
+                        onCustomerClick = { customer ->
+                            showDetailDialogForCustomer = customer
+                        },
+                        onDismiss = {
+                            showGlobalSearchPopup = false
+                            globalSearchQuery = ""
+                            keyboardController?.hide()
+                        },
+                        showInputField = false
+                    )
+                }
+            }
+        } else {
+            GlobalSearchPopup(
+                query = globalSearchQuery,
+                onQueryChange = { globalSearchQuery = it },
+                allCustomers = allCustomers,
+                formatter = formatter,
+                onCustomerClick = { customer ->
+                    showDetailDialogForCustomer = customer
+                },
+                onDismiss = {
+                    showGlobalSearchPopup = false
+                    globalSearchQuery = ""
+                },
+                showInputField = false
+            )
+        }
     }
 }
     }
@@ -6580,28 +6809,105 @@ fun DashboardScreen(
                     onDismissRequest = { viewModel.dismissUpdateDialog() },
                     containerColor = Color.White,
                     icon = {
-                        Icon(
-                            imageVector = Icons.Default.SystemUpdate,
-                            contentDescription = "Pembaruan Aplikasi",
-                            tint = Color(0xFF005FAF),
-                            modifier = Modifier.size(32.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(Color(0xFFFEF3C7)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.WarningAmber,
+                                contentDescription = "Peringatan Versi Baru",
+                                tint = Color(0xFFD97706),
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
                     },
                     title = {
                         Text(
-                            text = "Pembaruan Aplikasi Tersedia",
+                            text = "Peringatan Versi Baru",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00386B)
+                            color = Color(0xFF00386B),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("dialog_update_warning_title")
                         )
                     },
                     text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                text = "Versi terbaru ${release.tagName} tersedia (versi saat ini: v$currentVer).",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF334155)
-                            )
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFFFFFBEB),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCD34D)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "Tersedia versi aplikasi yang lebih baru (${release.tagName}).",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF92400E)
+                                    )
+                                    Text(
+                                        text = "Segera perbarui aplikasi untuk mendapatkan fitur terbaru, keamanan, dan perbaikan sistem.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFF78350F)
+                                    )
+                                }
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFFF0F9FF),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBAE6FD)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = "Versi Saat Ini",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF64748B)
+                                        )
+                                        Text(
+                                            text = "v$currentVer",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF334155)
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = null,
+                                        tint = Color(0xFF0284C7),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "Versi Terbaru",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF0369A1)
+                                        )
+                                        Text(
+                                            text = release.tagName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF005FAF)
+                                        )
+                                    }
+                                }
+                            }
                             if (release.apkSizeBytes > 0) {
                                 Text(
                                     text = String.format("Ukuran APK: %.1f MB", release.apkSizeBytes / (1024f * 1024f)),
@@ -6632,13 +6938,20 @@ fun DashboardScreen(
                                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .heightIn(max = 160.dp)
+                                        .heightIn(max = 150.dp)
                                 ) {
                                     Column(
                                         modifier = Modifier
                                             .verticalScroll(rememberScrollState())
-                                            .padding(10.dp)
+                                            .padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
+                                        Text(
+                                            text = "Catatan Pembaruan:",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF334155)
+                                        )
                                         Text(
                                             text = release.releaseNotes,
                                             style = MaterialTheme.typography.bodySmall,
@@ -6658,7 +6971,7 @@ fun DashboardScreen(
                                     .heightIn(min = 48.dp)
                                     .testTag("dialog_update_install_button")
                             ) {
-                                Text("Update & Instal", fontWeight = FontWeight.Bold)
+                                Text("Update Sekarang", fontWeight = FontWeight.Bold)
                             }
                         } else {
                             Button(
@@ -6680,7 +6993,9 @@ fun DashboardScreen(
                     dismissButton = {
                         TextButton(
                             onClick = { viewModel.dismissUpdateDialog() },
-                            modifier = Modifier.heightIn(min = 48.dp)
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("dialog_update_later_button")
                         ) {
                             Text("Nanti")
                         }
@@ -7116,7 +7431,10 @@ fun KelolaanHeaderBanner(
 }
 
 @Composable
-fun RencanaHeaderBanner(activeVisitDate: String) {
+fun RencanaHeaderBanner(
+    activeVisitDate: String,
+    onBackClick: () -> Unit = {}
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -7129,12 +7447,25 @@ fun RencanaHeaderBanner(activeVisitDate: String) {
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color(0xFFFFF7ED))
                 .border(1.dp, Color(0xFFEA580C).copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(start = 4.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            IconButton(
+                onClick = onBackClick,
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("rencana_back_to_beranda_button")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Kembali ke Beranda",
+                    tint = Color(0xFF7C2D12),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
             Icon(Icons.Default.EventNote, contentDescription = null, tint = Color(0xFFEA580C), modifier = Modifier.size(20.dp))
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text("Rencana Kunjungan & Aktivitas Harian", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF7C2D12))
                 Text(
                     text = "Tanggal Kunjungan : $activeVisitDate",

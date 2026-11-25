@@ -74,6 +74,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -85,6 +86,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -236,7 +238,7 @@ fun SettingsMenuPopupDialog(
                                         appUpdateState is AppUpdateState.ReadyToInstall ||
                                         appUpdateState is AppUpdateState.NeedsInstallPermission,
                                     onSelectBeranda = {
-                                        viewModel.setBottomNav("DASHBOARD")
+                                        viewModel.setBottomNav("BERANDA")
                                         onDismiss()
                                     },
                                     onSelectNasabah = {
@@ -360,109 +362,129 @@ fun SettingsMenuPopupDialog(
 }
 
 @Composable
+fun BriWaveHeaderBackground(
+    modifier: Modifier = Modifier,
+    seamlessTopBlend: Boolean = true,
+    bottomCurveColor: Color = Color.White,
+    referenceHeight: Dp? = null
+) {
+    Canvas(modifier = modifier.clipToBounds()) {
+        val w = size.width
+        val h = referenceHeight?.toPx() ?: size.height
+
+        // Deep blue base gradient
+        drawRect(
+            brush = Brush.linearGradient(
+                colors = if (seamlessTopBlend) {
+                    listOf(
+                        Color(0xFF003B8E),
+                        Color(0xFF005EC4),
+                        Color(0xFF0F7EE6)
+                    )
+                } else {
+                    listOf(
+                        Color(0xFF003B75),
+                        Color(0xFF005FAF),
+                        Color(0xFF0C74D1)
+                    )
+                },
+                start = Offset(0f, 0f),
+                end = Offset(w, h * 0.7f)
+            )
+        )
+
+        // Upper diagonal azure accent ribbon
+        val azureRibbon = Path().apply {
+            moveTo(w * 0.36f, 0f)
+            lineTo(w, 0f)
+            lineTo(w, h * 0.62f)
+            cubicTo(
+                w * 0.78f, h * 0.56f,
+                w * 0.58f, h * 0.25f,
+                w * 0.36f, 0f
+            )
+            close()
+        }
+        drawPath(
+            path = azureRibbon,
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    Color(0xFF0E76D6).copy(alpha = 0.60f),
+                    Color(0xFF38BDF8).copy(alpha = 0.35f)
+                ),
+                start = Offset(w * 0.4f, 0f),
+                end = Offset(w, h * 0.6f)
+            )
+        )
+
+        // Translucent cyan inner wave band
+        val softCyanWave = Path().apply {
+            moveTo(0f, h * 0.88f)
+            cubicTo(
+                w * 0.28f, h * 0.82f,
+                w * 0.62f, h * 0.40f,
+                w, h * 0.28f
+            )
+            lineTo(w, h)
+            lineTo(0f, h)
+            close()
+        }
+        drawPath(
+            path = softCyanWave,
+            color = Color(0xFF7DD3FC).copy(alpha = 0.30f)
+        )
+
+        // Crisp curved foreground transition into page surface
+        val bottomWave = Path().apply {
+            moveTo(0f, h * 0.96f)
+            cubicTo(
+                w * 0.30f, h * 0.96f,
+                w * 0.64f, h * 0.56f,
+                w, h * 0.46f
+            )
+            lineTo(w, h)
+            lineTo(0f, h)
+            close()
+        }
+        drawPath(
+            path = bottomWave,
+            color = bottomCurveColor
+        )
+    }
+}
+
+@Composable
 fun SettingsWaveProfileHeader(
     displayName: String,
     subtitle: String,
     onProfileClick: () -> Unit,
     seamlessTopBlend: Boolean = false,
+    topInset: Dp = 0.dp,
     endCornerContent: (@Composable BoxScope.() -> Unit)? = null
 ) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(126.dp)
+            .height(if (seamlessTopBlend) 142.dp + topInset else 126.dp)
     ) {
         // Layered Blue BRI Wave transitioning into crisp White at bottom-right
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = size.width
-            val h = size.height
-
-            // Deep blue base gradient
-            drawRect(
-                brush = Brush.linearGradient(
-                    colors = if (seamlessTopBlend) {
-                        listOf(
-                            Color(0xFF005FAF),
-                            Color(0xFF00539C),
-                            Color(0xFF0C74D1)
-                        )
-                    } else {
-                        listOf(
-                            Color(0xFF003B75),
-                            Color(0xFF005FAF),
-                            Color(0xFF0C74D1)
-                        )
-                    },
-                    start = Offset(0f, 0f),
-                    end = Offset(w, h * 0.7f)
-                )
-            )
-
-            // Upper diagonal azure accent ribbon
-            val azureRibbon = Path().apply {
-                moveTo(w * 0.36f, 0f)
-                lineTo(w, 0f)
-                lineTo(w, h * 0.62f)
-                cubicTo(
-                    w * 0.78f, h * 0.56f,
-                    w * 0.58f, h * 0.25f,
-                    w * 0.36f, 0f
-                )
-                close()
-            }
-            drawPath(
-                path = azureRibbon,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xFF0E76D6).copy(alpha = 0.60f),
-                        Color(0xFF38BDF8).copy(alpha = 0.35f)
-                    ),
-                    start = Offset(w * 0.4f, 0f),
-                    end = Offset(w, h * 0.6f)
-                )
-            )
-
-            // Translucent cyan inner wave band
-            val softCyanWave = Path().apply {
-                moveTo(0f, h * 0.88f)
-                cubicTo(
-                    w * 0.28f, h * 0.82f,
-                    w * 0.62f, h * 0.40f,
-                    w, h * 0.28f
-                )
-                lineTo(w, h)
-                lineTo(0f, h)
-                close()
-            }
-            drawPath(
-                path = softCyanWave,
-                color = Color(0xFF7DD3FC).copy(alpha = 0.30f)
-            )
-
-            // Crisp white curved foreground transition (creates clean corner pocket on bottom-right for BRI mark)
-            val whiteWave = Path().apply {
-                moveTo(0f, h * 0.96f)
-                cubicTo(
-                    w * 0.30f, h * 0.96f,
-                    w * 0.64f, h * 0.56f,
-                    w, h * 0.46f
-                )
-                lineTo(w, h)
-                lineTo(0f, h)
-                close()
-            }
-            drawPath(
-                path = whiteWave,
-                color = Color.White
-            )
-        }
+        BriWaveHeaderBackground(
+            modifier = Modifier.fillMaxSize(),
+            seamlessTopBlend = seamlessTopBlend,
+            bottomCurveColor = Color.White
+        )
 
         // Profile Row (Left/Center)
         Row(
             modifier = Modifier
                 .align(Alignment.CenterStart)
                 .fillMaxWidth()
-                .padding(start = 18.dp, end = 104.dp, bottom = 14.dp)
+                .padding(
+                    start = 18.dp,
+                    end = if (seamlessTopBlend) 84.dp else 104.dp,
+                    top = topInset + 4.dp,
+                    bottom = 14.dp
+                )
                 .clip(RoundedCornerShape(16.dp))
                 .clickable(onClick = onProfileClick)
                 .padding(vertical = 4.dp)
@@ -539,7 +561,7 @@ private fun MainPopupMenuList(
         PopupMenuRowItem(
             icon = Icons.Default.Home,
             label = "Beranda",
-            isSelected = selectedBottomNav == "DASHBOARD",
+            isSelected = selectedBottomNav == "BERANDA" || selectedBottomNav == "RENCANA",
             onClick = onSelectBeranda,
             testTag = "popup_menu_beranda"
         )

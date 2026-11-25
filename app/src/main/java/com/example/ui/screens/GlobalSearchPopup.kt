@@ -17,6 +17,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -36,7 +38,8 @@ fun GlobalSearchPopup(
     onCustomerClick: (CustomerEntity) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
-    showInputField: Boolean = true
+    showInputField: Boolean = true,
+    focusRequester: FocusRequester? = null
 ) {
     val trimmedQuery = query.trim()
     val searchResults = remember(trimmedQuery, allCustomers) {
@@ -88,7 +91,14 @@ fun GlobalSearchPopup(
                         singleLine = true,
                         modifier = Modifier
                             .weight(1f)
-                            .height(33.dp),
+                            .height(33.dp)
+                            .then(
+                                if (focusRequester != null) {
+                                    Modifier.focusRequester(focusRequester)
+                                } else {
+                                    Modifier
+                                }
+                            ),
                         decorationBox = { innerTextField ->
                             Row(
                                 modifier = Modifier
