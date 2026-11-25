@@ -78,9 +78,56 @@ object SpreadsheetService {
         return true
     }
 
+    private val syncCsvCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    @Volatile
+    private var syncCacheDepth = 0
+    private val syncCacheLock = Any()
+
+    fun beginSyncCache() {
+        synchronized(syncCacheLock) {
+            if (syncCacheDepth == 0) {
+                syncCsvCache.clear()
+            }
+            syncCacheDepth++
+        }
+    }
+
+    fun endSyncCache() {
+        synchronized(syncCacheLock) {
+            syncCacheDepth = (syncCacheDepth - 1).coerceAtLeast(0)
+            if (syncCacheDepth == 0) {
+                syncCsvCache.clear()
+            }
+        }
+    }
+
+    suspend fun <T> withSyncCsvCache(block: suspend () -> T): T {
+        beginSyncCache()
+        return try {
+            block()
+        } finally {
+            endSyncCache()
+        }
+    }
+
+    fun getCachedCsvDuringSync(url: String): String? {
+        if (url.isBlank() || syncCacheDepth <= 0) return null
+        val trimmed = url.trim()
+        val cacheKey = sanitizeSpreadsheetUrl(trimmed).ifBlank { trimmed }
+        return syncCsvCache[cacheKey] ?: syncCsvCache[trimmed]
+    }
+
     fun downloadSpreadsheetCsv(url: String): String {
         val trimmed = url.trim()
         if (trimmed.isBlank()) return ""
+
+        val cacheKey = sanitizeSpreadsheetUrl(trimmed).ifBlank { trimmed }
+        if (syncCacheDepth > 0) {
+            val cached = syncCsvCache[cacheKey] ?: syncCsvCache[trimmed]
+            if (!cached.isNullOrBlank()) {
+                return cached
+            }
+        }
 
         val candidateUrls = mutableListOf<String>()
 
@@ -137,6 +184,10 @@ object SpreadsheetService {
                             body = body.substring(1)
                         }
                         if (isValidCsvContent(body)) {
+                            if (syncCacheDepth > 0) {
+                                syncCsvCache[cacheKey] = body
+                                syncCsvCache[trimmed] = body
+                            }
                             return body
                         }
                     }
@@ -310,11 +361,7 @@ object SpreadsheetService {
             val csvContent = if (!offlineContent.isNullOrBlank()) {
                 offlineContent
             } else {
-                val sanitized = sanitizeSpreadsheetUrl(url!!)
-                val request = Request.Builder().url(sanitized).build()
-                client.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) response.body?.string() ?: "" else ""
-                }
+                downloadSpreadsheetCsv(url!!)
             }
             if (csvContent.isBlank() || 
                 csvContent.contains("<!DOCTYPE", ignoreCase = true) || 
@@ -440,11 +487,7 @@ object SpreadsheetService {
                 offlinePreviousMonthContent
             } else if (!previousMonthUrl.isNullOrBlank()) {
                 try {
-                    val prevUrl = sanitizeSpreadsheetUrl(previousMonthUrl)
-                    val prevRequest = Request.Builder().url(prevUrl).build()
-                    client.newCall(prevRequest).execute().use { response ->
-                        if (response.isSuccessful) response.body?.string() ?: "" else ""
-                    }
+                    downloadSpreadsheetCsv(previousMonthUrl)
                 } catch (e: Exception) {
                     Log.e(TAG, "Error fetching previous month data", e)
                     ""
@@ -1564,7 +1607,6 @@ object SpreadsheetService {
 
             // Look up No HP 1 and No HP 2 from kelolaanMap (Database Kelolaan) match on CIF
             val parts = mutableListOf<String>()
-            parts.add("isKelolaan::true")
             parts.add("NPD_FULL::${nextPmtDateStr.trim()}")
             if (menuType == "EKSTRAKOMP") {
                 val idxN = if (tglPhIdx != -1) tglPhIdx else (if (isBCMerged) 12 else 13)
@@ -1730,11 +1772,6 @@ object SpreadsheetService {
                 }
             }
             val finalSetorPokok = setorPokokVal
-            if (menuType == "EKSTRAKOMP") {
-                parts.add("UpdatePokok::$updatePokokVal")
-                parts.add("SetorPokok::$setorPokokVal")
-                extraColsVal = parts.joinToString("||")
-            }
             val rate = parseFormattedDouble(rateStr)
             val tenor = tenorStr.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 24
             

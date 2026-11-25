@@ -59,6 +59,7 @@ fun SettingsScreenView(
 
     // ViewModel states
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val lastSyncMetadata by viewModel.lastSyncMetadata.collectAsState()
     val loggedInPN by viewModel.loggedInPN.collectAsState()
     val loggedInMantriDetails by viewModel.loggedInMantriDetails.collectAsState()
 
@@ -1041,35 +1042,72 @@ fun SettingsScreenView(
             }
         }
 
-        // 6. Tombol Refresh / Sinkron Data (Berdiri Sendiri di Luar Kotak Akses PN)
-        Button(
-            onClick = {
-                viewModel.refreshSpreadsheetData(force = true)
-                Toast.makeText(context, "Menyinkronkan data...", Toast.LENGTH_SHORT).show()
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(44.dp)
-                .testTag("settings_refresh_button")
-        ) {
-            if (isRefreshing) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    color = Color.White,
-                    strokeWidth = 2.dp
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Sedang Menyinkronkan...", fontWeight = FontWeight.Bold)
+        // 6. Tombol Refresh / Sinkron Data & Info Memori Lokal (Berdiri Sendiri di Luar Kotak Akses PN)
+        val lastSyncText = remember(lastSyncMetadata) {
+            val ts = lastSyncMetadata?.lastSyncedAt ?: 0L
+            if (ts > 0L) {
+                java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale("id", "ID"))
+                    .format(java.util.Date(ts))
             } else {
+                "Belum ada sinkronisasi"
+            }
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Button(
+                onClick = {
+                    viewModel.refreshSpreadsheetData(force = true)
+                    Toast.makeText(context, "Menyinkronkan data ke memori HP...", Toast.LENGTH_SHORT).show()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp)
+                    .testTag("settings_refresh_button")
+            ) {
+                if (isRefreshing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Sedang Menyinkronkan...", fontWeight = FontWeight.Bold)
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Refresh Data",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Refresh / Sinkron Data", fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Refresh Data",
-                    modifier = Modifier.size(18.dp)
+                    imageVector = Icons.Default.Save,
+                    contentDescription = null,
+                    tint = Color(0xFF005FAF),
+                    modifier = Modifier.size(13.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Refresh / Sinkron Data", fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    text = "Data tersimpan di memori HP • Terakhir update: $lastSyncText",
+                    fontSize = 10.5.sp,
+                    color = Color(0xFF475569),
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center
+                )
             }
         }
 

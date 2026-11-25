@@ -9,6 +9,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -542,6 +543,7 @@ fun DashboardScreen(
     val loggedInPN by viewModel.loggedInPN.collectAsState()
     val loggedInDetails by viewModel.loggedInMantriDetails.collectAsState()
     val kunjunganKeys by viewModel.kunjunganKeys.collectAsState()
+    val activeVisitDateStr by viewModel.activeVisitDateStr.collectAsState()
     val allCustomers by viewModel.allCustomersList.collectAsState()
     val monitoringCustomers by viewModel.monitoringCustomers.collectAsState()
     val tindakLanjutMap by viewModel.tindakLanjutMap.collectAsState()
@@ -1096,14 +1098,30 @@ fun DashboardScreen(
                     }
 
                     // Popup Search Results for KUNJUNGAN menu
-                    val matchedCustomers = remember(searchQuery, allCustomers) {
+                    var exitingSearchKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
+                    LaunchedEffect(searchQuery, selectedMenu) {
+                        if (selectedMenu != "KUNJUNGAN" || searchQuery.isBlank()) {
+                            exitingSearchKeys = emptySet()
+                        }
+                    }
+
+                    val matchedCustomers = remember(searchQuery, allCustomers, kunjunganKeys, exitingSearchKeys, selectedMenu) {
                         if (selectedMenu == "KUNJUNGAN" && searchQuery.isNotBlank()) {
                             val q = searchQuery.trim().lowercase()
-                            allCustomers.filter {
-                                it.namaNasabah.lowercase().contains(q) ||
-                                it.cif.lowercase().contains(q) ||
-                                it.alamat.lowercase().contains(q)
-                            }.take(10)
+                            allCustomers
+                                .asSequence()
+                                .filter {
+                                    it.namaNasabah.lowercase().contains(q) ||
+                                    it.cif.lowercase().contains(q) ||
+                                    it.alamat.lowercase().contains(q)
+                                }
+                                .distinctBy { rencanaCustomerKey(it) }
+                                .filter { customer ->
+                                    val key = rencanaCustomerKey(customer)
+                                    key in exitingSearchKeys || key !in kunjunganKeys
+                                }
+                                .take(10)
+                                .toList()
                         } else {
                             emptyList()
                         }
@@ -1129,47 +1147,121 @@ fun DashboardScreen(
                                     .verticalScroll(rememberScrollState())
                                     .padding(vertical = 4.dp)
                             ) {
-                                matchedCustomers.forEach { customer ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
+                                matchedCustomers.forEachIndexed { index, customer ->
+                                    val custKey = rencanaCustomerKey(customer)
+                                    val isExiting = custKey in exitingSearchKeys
+                                    val isEkstrakomp = customer.menuType.equals("EKSTRAKOMP", ignoreCase = true)
+                                    val cifText = customer.cif.trim()
+                                    val kolekText = if (isEkstrakomp) "DH" else getShortKolekLabel(customer.kolek).trim()
+                                    val (kolekBgColor, kolekTextColor) = resolveRencanaSearchKolekColors(kolekText)
+                                    val mantriText = cleanMantriNameOnly(customer.namaMantri).trim()
+                                    val displayAlamat = customer.alamat.trim()
+
+                                    val onAddCustomer = {
+                                        if (!isExiting) {
+                                            if (viewModel.isPastDate(activeVisitDateStr)) {
+                                                Toast.makeText(
+                                                    context,
+                                                    "Tidak dapat menambah rencana pada tanggal yang sudah berlalu",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            } else {
+                                                exitingSearchKeys = exitingSearchKeys + custKey
                                                 viewModel.addKunjungan(customer)
-                                            }
-                                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = customer.namaNasabah,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color(0xFF001C3B)
-                                            )
-                                            Spacer(modifier = Modifier.height(2.dp))
-                                            Text(
-                                                text = "CIF: ${customer.cif} | Menu: ${customer.menuType}",
-                                                fontSize = 10.sp,
-                                                color = Color(0xFF43474E)
-                                            )
-                                            if (customer.alamat.isNotBlank()) {
-                                                Text(
-                                                    text = "Alamat: ${customer.alamat}",
-                                                    fontSize = 10.sp,
-                                                    color = Color(0xFF74777F),
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
+                                                coroutineScope.launch {
+                                                    delay(280)
+                                                    exitingSearchKeys = exitingSearchKeys - custKey
+                                                }
                                             }
                                         }
-                                        Icon(
-                                            imageVector = Icons.Default.Add,
-                                            contentDescription = "Tambah ke Kunjungan",
-                                            tint = Color(0xFF005FAF),
-                                            modifier = Modifier.size(20.dp)
-                                        )
                                     }
-                                    HorizontalDivider(color = Color(0xFFEEF4FC), thickness = 1.dp)
+
+                                    key(custKey) {
+                                        AnimatedVisibility(
+                                            visible = !isExiting,
+                                            exit = fadeOut(animationSpec = tween(220)) +
+                                                slideOutHorizontally(animationSpec = tween(260)) { fullWidth -> fullWidth / 3 } +
+                                                shrinkVertically(animationSpec = tween(260))
+                                        ) {
+                                            Column(modifier = Modifier.fillMaxWidth()) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable(onClick = onAddCustomer)
+                                                        .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp)
+                                                        .testTag("rencana_search_item_$index"),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .padding(end = 6.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                                                    ) {
+                                                        @OptIn(ExperimentalLayoutApi::class)
+                                                        FlowRow(
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = customer.namaNasabah,
+                                                                fontSize = 12.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = Color(0xFF001C3B),
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis,
+                                                                modifier = Modifier.align(Alignment.CenterVertically)
+                                                            )
+                                                            if (cifText.isNotBlank()) {
+                                                                RencanaSearchBadge(
+                                                                    text = cifText,
+                                                                    modifier = Modifier.align(Alignment.CenterVertically)
+                                                                )
+                                                            }
+                                                            if (kolekText.isNotBlank()) {
+                                                                RencanaSearchBadge(
+                                                                    text = kolekText,
+                                                                    bgColor = kolekBgColor,
+                                                                    textColor = kolekTextColor,
+                                                                    modifier = Modifier.align(Alignment.CenterVertically)
+                                                                )
+                                                            }
+                                                            if (mantriText.isNotBlank()) {
+                                                                RencanaSearchBadge(
+                                                                    text = mantriText,
+                                                                    modifier = Modifier.align(Alignment.CenterVertically)
+                                                                )
+                                                            }
+                                                        }
+                                                        if (displayAlamat.isNotBlank()) {
+                                                            Text(
+                                                                text = displayAlamat,
+                                                                fontSize = 10.5.sp,
+                                                                color = Color(0xFF64748B),
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
+                                                            )
+                                                        }
+                                                    }
+                                                    IconButton(
+                                                        onClick = onAddCustomer,
+                                                        modifier = Modifier
+                                                            .size(48.dp)
+                                                            .testTag("rencana_search_add_button_$index")
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Add,
+                                                            contentDescription = "Tambah ke Kunjungan",
+                                                            tint = Color(0xFF005FAF),
+                                                            modifier = Modifier.size(22.dp)
+                                                        )
+                                                    }
+                                                }
+                                                HorizontalDivider(color = Color(0xFFEEF4FC), thickness = 1.dp)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -6222,9 +6314,36 @@ fun DashboardScreen(
             confirmButton = {
                 Button(
                     onClick = { showSettingsDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .testTag("link_dialog_close_button")
                 ) {
                     Text("Tutup")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        viewModel.refreshSpreadsheetData(force = true)
+                        showSettingsDialog = false
+                        android.widget.Toast.makeText(
+                            context,
+                            "Menyinkronkan data dari link...",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    },
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .testTag("link_dialog_refresh_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Refresh Data")
                 }
             }
         )
@@ -9523,6 +9642,56 @@ fun getShortKolekLabel(kolek: String): String {
         clean.contains("DIRAGUKAN") || clean == "D" -> "D"
         clean.contains("MACET") || clean == "M" -> "M"
         else -> kolek
+    }
+}
+
+private fun rencanaCustomerKey(customer: CustomerEntity): String =
+    if (customer.noRekening.isNotBlank()) customer.noRekening
+    else if (customer.cif.isNotBlank()) customer.cif
+    else customer.namaNasabah
+
+private fun resolveRencanaSearchKolekColors(kolekLabel: String): Pair<Color, Color> {
+    val clean = kolekLabel.trim().uppercase()
+    return when {
+        clean == "DH" -> Color(0xFFFFDAD6) to Color(0xFF93000A)
+        clean.contains("KL") || clean.contains("KURANG") || clean.contains("K.LANCAR") || clean.contains("K. LANCAR") ->
+            Color(0xFFFCE7F3) to Color(0xFFBE185D)
+        clean.contains("LANCAR") || clean == "L" ->
+            Color(0xFFDCFCE7) to Color(0xFF15803D)
+        clean.contains("SML1") || clean.contains("SML2") || clean.contains("SML3") ||
+            clean.contains("SML 1") || clean.contains("SML 2") || clean.contains("SML 3") ||
+            clean.contains("DPK") || clean == "SML" ->
+            Color(0xFFFEF3C7) to Color(0xFFD97706)
+        clean.contains("DIRAGUKAN") || clean == "D" ->
+            Color(0xFFFEE2E2) to Color(0xFFDC2626)
+        clean.contains("MACET") || clean == "M" || clean == "NPL" ->
+            Color(0xFFEF4444) to Color.White
+        else -> Color(0xFFF3EDF7) to Color(0xFF49454F)
+    }
+}
+
+@Composable
+private fun RencanaSearchBadge(
+    text: String,
+    modifier: Modifier = Modifier,
+    bgColor: Color = Color(0xFF005FAF),
+    textColor: Color = Color.White
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(3.dp),
+        color = bgColor
+    ) {
+        Text(
+            text = text,
+            fontSize = 8.sp,
+            lineHeight = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = textColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+        )
     }
 }
 

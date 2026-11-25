@@ -12,7 +12,7 @@ import com.example.data.model.SyncMetadataEntity
 
 @Database(
     entities = [CustomerEntity::class, Di319Entity::class, SyncMetadataEntity::class],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -35,6 +35,15 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_customers_menuType` ON `customers` (`menuType`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_customers_noRekening` ON `customers` (`noRekening`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_customers_cif` ON `customers` (`cif`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_di319_rows_cif` ON `di319_rows` (`cif`)")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -42,7 +51,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "customer_database"
                 )
-                    .addMigrations(MIGRATION_9_10)
+                    .addMigrations(MIGRATION_9_10, MIGRATION_10_11)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

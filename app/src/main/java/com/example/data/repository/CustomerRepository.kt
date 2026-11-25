@@ -87,6 +87,43 @@ class CustomerRepository(
         )
     }
 
+    suspend fun copyPeriodToMenu(
+        periodMenuType: String,
+        targetMenuType: String = "INTRAKOMP"
+    ): Boolean = withContext(Dispatchers.IO) {
+        val cachedPeriod = customerDao.getCustomersByMenuOnce(periodMenuType)
+        if (cachedPeriod.isEmpty()) return@withContext false
+
+        val existingTarget = customerDao.getCustomersByMenuOnce(targetMenuType)
+        val byRek = HashMap<String, CustomerEntity>(existingTarget.size)
+        val byCif = HashMap<String, CustomerEntity>(existingTarget.size)
+        existingTarget.forEach { item ->
+            val rekKey = item.noRekening.filter { it.isDigit() }.ifBlank { item.noRekening.trim() }
+            if (rekKey.isNotBlank()) byRek[rekKey] = item
+            val cifKey = item.cif.trim().uppercase()
+            if (cifKey.isNotBlank()) byCif[cifKey] = item
+        }
+
+        val normalized = cachedPeriod.map { item ->
+            val rekKey = item.noRekening.filter { it.isDigit() }.ifBlank { item.noRekening.trim() }
+            val cifKey = item.cif.trim().uppercase()
+            val match = byRek[rekKey] ?: byCif[cifKey]
+            item.copy(
+                id = 0,
+                menuType = targetMenuType,
+                alamat = item.alamat.ifBlank { match?.alamat ?: "" },
+                kolekBlnLalu = item.kolekBlnLalu.ifBlank { match?.kolekBlnLalu ?: "" },
+                extraColumns = if (item.extraColumns.contains("Desa::") || item.extraColumns.contains("No HP")) {
+                    item.extraColumns
+                } else {
+                    match?.extraColumns?.takeIf { it.isNotBlank() } ?: item.extraColumns
+                }
+            )
+        }
+        customerDao.refreshCustomers(targetMenuType, normalized)
+        true
+    }
+
     suspend fun saveDi319Rows(rows: List<Di319Row>) = withContext(Dispatchers.IO) {
         if (rows.isEmpty()) return@withContext
         val dao = di319Dao ?: return@withContext

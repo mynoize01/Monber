@@ -342,8 +342,13 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         val trimmed = pn.trim()
         sharedPrefs.edit().putString("logged_in_pn", trimmed).apply()
         loggedInPN.value = trimmed
-        // User requested: "perbaiki menu kelolaan ketika sudah di input PN maka data langsung tampil"
-        refreshSpreadsheetData()
+        viewModelScope.launch(Dispatchers.IO) {
+            if (repository.getTotalCustomersCount() == 0 &&
+                (isOfflineModeEnabled.value || repository.isNetworkAvailable(getApplication()))
+            ) {
+                refreshSpreadsheetData(force = true)
+            }
+        }
     }
 
     fun logoff() {
@@ -381,12 +386,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             "e_url_2" -> eUrl2.value = trimmed
             "k_url_1" -> kUrl1.value = trimmed
             "di319_url" -> di319Url.value = trimmed
-            "lw325_daily_url" -> {
-                lw325DailyUrl.value = trimmed
-                if (trimmed.isNotBlank()) {
-                    loadLw325DailyCustomers(forceRefresh = true)
-                }
-            }
+            "lw325_daily_url" -> lw325DailyUrl.value = trimmed
             "link_database_url" -> {
                 linkDatabaseUrl.value = trimmed
                 if (url4.value.isBlank()) {
@@ -395,7 +395,6 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         }
-        fetchPeriodDates()
     }
 
     fun saveLw321AllLink(month: Int, url: String) {
@@ -406,9 +405,6 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         if (prevUrl != trimmed) {
             monthlyLw321KolekCache.remove(month)
             monthlyLw321TunggakanCache.remove(month)
-        }
-        if (selectedPeriodSource.value == "BULAN_$month" || filterBulanLunas.value == String.format("%02d", month)) {
-            refreshSpreadsheetData()
         }
     }
 
@@ -445,9 +441,10 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         loadSummaryForPeriod(source)
     }
 
-    fun loadSummaryForPeriod(source: String) {
+    fun loadSummaryForPeriod(source: String, forceRefresh: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
             val isOffline = isOfflineModeEnabled.value
+            val hasNetwork = isOffline || repository.isNetworkAvailable(getApplication())
             when {
                 source.startsWith("BULAN_") -> {
                     val m = source.removePrefix("BULAN_").toIntOrNull()
@@ -457,9 +454,28 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 }
                 source == "BULAN_LALU" -> {
                     try {
+                        if (!forceRefresh) {
+                            if (bulanLaluCustomers.value.isNotEmpty() && summaryBulanLalu.value.debtors > 0) {
+                                return@launch
+                            }
+                            val cachedPeriod = repository.getCachedPeriodCustomers("PERIOD_BULAN_LALU")
+                            if (cachedPeriod.isNotEmpty()) {
+                                bulanLaluCustomers.value = cachedPeriod
+                                summaryBulanLalu.value = UnitSummaryData(
+                                    os = cachedPeriod.sumOf { it.osPinjaman },
+                                    debtors = cachedPeriod.size
+                                )
+                                kolekSummaryBulanLalu.value = calculateKolekSummary(cachedPeriod)
+                                mantriSummaryBulanLalu.value = calculateMantriSummaries(cachedPeriod)
+                                persistCurrentSummaries()
+                                return@launch
+                            }
+                        }
+
                         val content = if (isOffline) getOfflineFileContent("url_1") else null
                         val url = if (!isOffline) (url1.value.ifBlank { urlLw321BlnLalu.value }) else null
-                        val map = if (!url.isNullOrBlank() || !content.isNullOrBlank()) repository.getDailyInfo(url, content) else emptyMap()
+                        val canFetch = (!content.isNullOrBlank()) || (!url.isNullOrBlank() && hasNetwork)
+                        val map = if (canFetch) repository.getDailyInfo(url, content) else emptyMap()
                         val unique = getDistinctCustomers(map)
                         if (unique.isNotEmpty()) {
                             repository.savePeriodCustomers("PERIOD_BULAN_LALU", unique)
@@ -518,12 +534,42 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 }
                 source == "AKHIR_BULAN" -> {
                     try {
-                        if (bulanLaluCustomers.value.isEmpty()) {
-                            loadSummaryForPeriod("BULAN_LALU")
+                        if (!forceRefresh) {
+                            if (bulanLaluCustomers.value.isEmpty()) {
+                                val cachedBlnLalu = repository.getCachedPeriodCustomers("PERIOD_BULAN_LALU")
+                                if (cachedBlnLalu.isNotEmpty()) {
+                                    bulanLaluCustomers.value = cachedBlnLalu
+                                    summaryBulanLalu.value = UnitSummaryData(
+                                        os = cachedBlnLalu.sumOf { it.osPinjaman },
+                                        debtors = cachedBlnLalu.size
+                                    )
+                                    kolekSummaryBulanLalu.value = calculateKolekSummary(cachedBlnLalu)
+                                    mantriSummaryBulanLalu.value = calculateMantriSummaries(cachedBlnLalu)
+                                }
+                            }
+                            if (akhirBulanCustomers.value.isNotEmpty() && summaryAkhirBulan.value.debtors > 0) {
+                                return@launch
+                            }
+                            val cachedPeriod = repository.getCachedPeriodCustomers("PERIOD_AKHIR_BULAN")
+                            if (cachedPeriod.isNotEmpty()) {
+                                akhirBulanCustomers.value = cachedPeriod
+                                summaryAkhirBulan.value = UnitSummaryData(
+                                    os = cachedPeriod.sumOf { it.osPinjaman },
+                                    debtors = cachedPeriod.size
+                                )
+                                kolekSummaryAkhirBulan.value = calculateKolekSummary(cachedPeriod)
+                                mantriSummaryAkhirBulan.value = calculateMantriSummaries(cachedPeriod)
+                                persistCurrentSummaries()
+                                return@launch
+                            }
+                        } else if (bulanLaluCustomers.value.isEmpty()) {
+                            loadSummaryForPeriod("BULAN_LALU", forceRefresh = false)
                         }
+
                         val content = if (isOffline) getOfflineFileContent("url_2") else null
                         val url = if (!isOffline) url2.value else null
-                        val map = if (!url.isNullOrBlank() || !content.isNullOrBlank()) repository.getDailyInfo(url, content) else emptyMap()
+                        val canFetch = (!content.isNullOrBlank()) || (!url.isNullOrBlank() && hasNetwork)
+                        val map = if (canFetch) repository.getDailyInfo(url, content) else emptyMap()
                         val unique = getDistinctCustomers(map)
                         if (unique.isNotEmpty()) {
                             repository.savePeriodCustomers("PERIOD_AKHIR_BULAN", unique)
@@ -569,12 +615,45 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 }
                 source == "DAILY" -> {
                     try {
-                        if (akhirBulanCustomers.value.isEmpty()) {
-                            launch { loadSummaryForPeriod("AKHIR_BULAN") }
+                        if (!forceRefresh) {
+                            if (akhirBulanCustomers.value.isEmpty()) {
+                                val cachedAkhir = repository.getCachedPeriodCustomers("PERIOD_AKHIR_BULAN")
+                                if (cachedAkhir.isNotEmpty()) {
+                                    akhirBulanCustomers.value = cachedAkhir
+                                    summaryAkhirBulan.value = UnitSummaryData(
+                                        os = cachedAkhir.sumOf { it.osPinjaman },
+                                        debtors = cachedAkhir.size
+                                    )
+                                    kolekSummaryAkhirBulan.value = calculateKolekSummary(cachedAkhir)
+                                    mantriSummaryAkhirBulan.value = calculateMantriSummaries(cachedAkhir)
+                                }
+                            }
+                            if (dailyCustomers.value.isNotEmpty() && dailyDataMap.value.isNotEmpty() && summaryDaily.value.debtors > 0) {
+                                return@launch
+                            }
+                            val cachedDaily = repository.getCachedPeriodCustomers("PERIOD_DAILY")
+                            if (cachedDaily.isNotEmpty()) {
+                                dailyCustomers.value = cachedDaily
+                                if (dailyDataMap.value.isEmpty()) {
+                                    dailyDataMap.value = buildLookupMapFromEntities(cachedDaily)
+                                }
+                                summaryDaily.value = UnitSummaryData(
+                                    os = cachedDaily.sumOf { it.osPinjaman },
+                                    debtors = cachedDaily.size
+                                )
+                                kolekSummaryDaily.value = calculateKolekSummary(cachedDaily)
+                                mantriSummaryDaily.value = calculateMantriSummaries(cachedDaily)
+                                persistCurrentSummaries()
+                                return@launch
+                            }
+                        } else if (akhirBulanCustomers.value.isEmpty()) {
+                            loadSummaryForPeriod("AKHIR_BULAN", forceRefresh = false)
                         }
+
                         val content = if (isOffline) getOfflineFileContent("url_3") else null
                         val url = if (!isOffline) url3.value else null
-                        if (!url.isNullOrBlank() || !content.isNullOrBlank()) {
+                        val canFetch = (!content.isNullOrBlank()) || (!url.isNullOrBlank() && hasNetwork)
+                        if (canFetch) {
                             val map = repository.getDailyInfo(url, content)
                             val unique = getDistinctCustomers(map)
                             if (map.isNotEmpty() && unique.isNotEmpty()) {
@@ -633,14 +712,25 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
 
     private suspend fun fetchAndCacheLw325DailyCustomers(forceRefresh: Boolean = false) {
         try {
+            if (!forceRefresh) {
+                if (lw325DailyCustomers.value.isNotEmpty()) return
+                val cached = repository.getCachedPeriodCustomers("PERIOD_LW325_DAILY")
+                if (cached.isNotEmpty()) {
+                    lw325DailyCustomers.value = cached.map { it.copy(menuType = "EKSTRAKOMP") }
+                    return
+                }
+            }
+
             val isOffline = isOfflineModeEnabled.value
             val offlineContent = if (isOffline) getOfflineFileContent("lw325_daily_url") else null
             val url = if (!isOffline) lw325DailyUrl.value else null
+            if (!isOffline && !url.isNullOrBlank() && !repository.isNetworkAvailable(getApplication())) {
+                return
+            }
             val offlineLw321 = if (isOffline) getOfflineFileContent("e_url_2") else null
             val lw321Url = if (!isOffline) eUrl2.value.ifBlank { null } else null
 
             if (!offlineContent.isNullOrBlank() || !url.isNullOrBlank()) {
-                if (!forceRefresh && lw325DailyCustomers.value.isNotEmpty()) return
                 val rawList = repository.getLw325DailyCustomers(
                     url = url,
                     offlineContent = offlineContent,
@@ -681,6 +771,22 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     fun loadDashboardMonthlyData(m: Int) {
         if (dashboardMonthlySummary.value.containsKey(m)) return
         viewModelScope.launch(Dispatchers.IO) {
+            val cachedRoomMonth = repository.getCachedPeriodCustomers("PERIOD_LW321_ALL_$m")
+            if (cachedRoomMonth.isNotEmpty()) {
+                val sumData = UnitSummaryData(
+                    os = cachedRoomMonth.sumOf { it.osPinjaman },
+                    debtors = cachedRoomMonth.size
+                )
+                val kolekData = calculateKolekSummary(cachedRoomMonth)
+                val mantriData = calculateMantriSummaries(cachedRoomMonth)
+
+                dashboardMonthlySummary.value = dashboardMonthlySummary.value + (m to sumData)
+                dashboardMonthlyKolekSummary.value = dashboardMonthlyKolekSummary.value + (m to kolekData)
+                dashboardMonthlyMantriSummary.value = dashboardMonthlyMantriSummary.value + (m to mantriData)
+                persistCurrentSummaries()
+                return@launch
+            }
+
             val isOffline = isOfflineModeEnabled.value
             if (!isOffline && !repository.isNetworkAvailable(getApplication())) {
                 isShowingCachedOfflineData.value = true
@@ -695,6 +801,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 val monthMap = repository.getDailyInfo(if (isOffline) null else url, offlineContent)
                 val uniqueMonth = getDistinctCustomers(monthMap)
                 if (uniqueMonth.isNotEmpty()) {
+                    repository.savePeriodCustomers("PERIOD_LW321_ALL_$m", uniqueMonth)
                     val sumData = UnitSummaryData(
                         os = uniqueMonth.sumOf { it.osPinjaman },
                         debtors = uniqueMonth.size
@@ -1075,7 +1182,22 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 filterBulanLunas.value = String.format("%02d", m)
             }
         }
-        refreshSpreadsheetData()
+        viewModelScope.launch(Dispatchers.IO) {
+            val periodKey = when {
+                source == "BULAN_LALU" -> "PERIOD_BULAN_LALU"
+                source == "AKHIR_BULAN" -> "PERIOD_AKHIR_BULAN"
+                source == "DAILY" -> "PERIOD_DAILY"
+                source.startsWith("BULAN_") -> {
+                    val m = source.removePrefix("BULAN_").toIntOrNull()
+                    if (m != null && m in 1..12) "PERIOD_LW321_ALL_$m" else ""
+                }
+                else -> ""
+            }
+            if (periodKey.isNotBlank() && repository.copyPeriodToMenu(periodKey, "INTRAKOMP")) {
+                return@launch
+            }
+            refreshSpreadsheetData(force = false)
+        }
     }
 
     fun setFilterBulanLunas(bulan: String) {
@@ -1162,55 +1284,54 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 return@launch
             }
 
-            val client = okhttp3.OkHttpClient()
-            // 1. Bulan Lalu
-            val u1 = url1.value
-            if (u1.isNotBlank()) {
-                val date = extractB5DatePriv(client, u1)
-                if (date.isNotBlank()) {
-                    sharedPrefs.edit().putString("period_date_bulan_lalu", date).apply()
-                    periodDateBulanLalu.value = date
+            SpreadsheetService.withSyncCsvCache {
+                // 1. Bulan Lalu
+                val u1 = url1.value
+                if (u1.isNotBlank()) {
+                    val date = extractB5DateFromUrlOrCache(u1)
+                    if (date.isNotBlank()) {
+                        sharedPrefs.edit().putString("period_date_bulan_lalu", date).apply()
+                        periodDateBulanLalu.value = date
+                    }
                 }
-            }
-            // 2. Akhir Bulan
-            val u2 = url2.value
-            if (u2.isNotBlank()) {
-                val date = extractB5DatePriv(client, u2)
-                if (date.isNotBlank()) {
-                    sharedPrefs.edit().putString("period_date_akhir_bulan", date).apply()
-                    periodDateAkhirBulan.value = date
+                // 2. Akhir Bulan
+                val u2 = url2.value
+                if (u2.isNotBlank()) {
+                    val date = extractB5DateFromUrlOrCache(u2)
+                    if (date.isNotBlank()) {
+                        sharedPrefs.edit().putString("period_date_akhir_bulan", date).apply()
+                        periodDateAkhirBulan.value = date
+                    }
                 }
-            }
-            // 3. Daily
-            val u3 = url3.value
-            if (u3.isNotBlank()) {
-                val date = extractB5DatePriv(client, u3)
-                if (date.isNotBlank()) {
-                    sharedPrefs.edit().putString("period_date_daily", date).apply()
-                    periodDateDaily.value = date
+                // 3. Daily
+                val u3 = url3.value
+                if (u3.isNotBlank()) {
+                    val date = extractB5DateFromUrlOrCache(u3)
+                    if (date.isNotBlank()) {
+                        sharedPrefs.edit().putString("period_date_daily", date).apply()
+                        periodDateDaily.value = date
+                    }
                 }
-            }
-            // 4. LW325 (Ekstrakomp)
-            val eu1 = eUrl1.value
-            if (eu1.isNotBlank()) {
-                val date = extractB5DatePriv(client, eu1)
-                if (date.isNotBlank()) {
-                    sharedPrefs.edit().putString("period_date_lw325", date).apply()
-                    periodDateLw325.value = date
+                // 4. LW325 (Ekstrakomp)
+                val eu1 = eUrl1.value
+                if (eu1.isNotBlank()) {
+                    val date = extractB5DateFromUrlOrCache(eu1)
+                    if (date.isNotBlank()) {
+                        sharedPrefs.edit().putString("period_date_lw325", date).apply()
+                        periodDateLw325.value = date
+                    }
                 }
             }
         }
     }
 
-    private fun extractB5DatePriv(client: okhttp3.OkHttpClient, rawUrl: String): String {
+    private fun extractB5DateFromUrlOrCache(rawUrl: String): String {
+        if (rawUrl.isBlank()) return ""
         try {
-            val url = SpreadsheetService.sanitizeSpreadsheetUrl(rawUrl)
-            val request = okhttp3.Request.Builder().url(url).build()
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    val csvContent = response.body?.string() ?: ""
-                    return extractDateFromCsvContent(csvContent)
-                }
+            val csvContent = SpreadsheetService.getCachedCsvDuringSync(rawUrl)
+                ?: SpreadsheetService.downloadSpreadsheetCsv(rawUrl)
+            if (csvContent.isNotBlank()) {
+                return extractDateFromCsvContent(csvContent)
             }
         } catch (e: Exception) {
             android.util.Log.e("CustomerViewModel", "Failed to extract B5 from $rawUrl", e)
@@ -1222,13 +1343,16 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         val trimmed = url.trim()
         sharedPrefs.edit().putString("custom_spreadsheet_url", trimmed).apply()
         customSpreadsheetUrl.value = trimmed
-        refreshSpreadsheetData()
     }
 
     fun toggleOfflineMode(enabled: Boolean) {
         sharedPrefs.edit().putBoolean("is_offline_mode_enabled", enabled).apply()
         isOfflineModeEnabled.value = enabled
-        refreshSpreadsheetData()
+        viewModelScope.launch(Dispatchers.IO) {
+            if (enabled || repository.getTotalCustomersCount() == 0) {
+                refreshSpreadsheetData(force = false)
+            }
+        }
     }
 
     fun getOfflineFileContent(key: String): String? {
@@ -1262,7 +1386,9 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 "di319_url" -> offlineNameDi319Url.value = ""
                 "lw325_daily_url" -> offlineNameLw325Daily.value = ""
             }
-            refreshSpreadsheetData()
+            if (isOfflineModeEnabled.value) {
+                refreshSpreadsheetData()
+            }
         } catch (e: Exception) {
             android.util.Log.e("CustomerViewModel", "Failed to delete offline file $key", e)
         }
@@ -1302,7 +1428,9 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
                 
-                refreshSpreadsheetData()
+                if (isOfflineModeEnabled.value) {
+                    refreshSpreadsheetData()
+                }
             } catch (e: Exception) {
                 android.util.Log.e("CustomerViewModel", "Failed to save offline file $key", e)
             }
@@ -1351,7 +1479,6 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     fun deleteCustomUrl() {
         sharedPrefs.edit().remove("custom_spreadsheet_url").apply()
         customSpreadsheetUrl.value = ""
-        refreshSpreadsheetData()
     }
 
     fun isPastDate(dateStr: String): Boolean {
@@ -2921,7 +3048,6 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
 
         loadTindakLanjutMap()
         loadLocalCachedData()
-        loadDailyDataForFilter()
         viewModelScope.launch {
             repository.getDi319Flow().collect { cachedRows ->
                 if (cachedRows.isNotEmpty()) {
@@ -2934,22 +3060,13 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             val networkOk = repository.isNetworkAvailable(getApplication())
             if (totalCustomers == 0) {
                 if (networkOk) {
-                    val curMenu = selectedMenu.value
-                    val fetchMenu = if (curMenu == "KELOLAAN" || curMenu == "KUNJUNGAN") "INTRAKOMP" else curMenu
-                    if (fetchMenu != "SIMPANAN") {
-                        refreshSpreadsheetData()
-                    }
+                    refreshSpreadsheetData(force = true)
                 } else {
-                    repository.seedMockIfEmpty("INTRAKOMP")
-                    repository.seedMockIfEmpty("EKSTRAKOMP")
                     isShowingCachedOfflineData.value = true
                     errorMessage.value = "Tidak ada koneksi internet dan belum ada data tersimpan."
                 }
             } else if (!networkOk && !isOfflineModeEnabled.value) {
                 isShowingCachedOfflineData.value = true
-            }
-            if (networkOk && periodDateDaily.value.isBlank() && periodDateAkhirBulan.value.isBlank()) {
-                fetchPeriodDates()
             }
         }
         viewModelScope.launch {
@@ -2998,7 +3115,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             filterKolekUpdate.collect { ku ->
                 if (ku != "SEMUA" && dailyDataMap.value.isEmpty()) {
-                    loadDailyDataForFilter()
+                    loadDailyDataForFilter(forceRefresh = false)
                 }
             }
         }
@@ -3030,16 +3147,26 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         checkForUpdates(autoInstallOnFind = false, isAutoBackgroundCheck = true)
     }
 
-    fun loadDailyDataForFilter() {
+    fun loadDailyDataForFilter(forceRefresh: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                if (dailyDataMap.value.isEmpty()) {
-                    val cachedDaily = repository.getCachedPeriodCustomers("PERIOD_DAILY")
-                    if (cachedDaily.isNotEmpty()) {
+                if (!forceRefresh && dailyDataMap.value.isNotEmpty()) {
+                    return@launch
+                }
+                val cachedDaily = repository.getCachedPeriodCustomers("PERIOD_DAILY")
+                if (cachedDaily.isNotEmpty()) {
+                    if (dailyCustomers.value.isEmpty()) {
                         dailyCustomers.value = cachedDaily
+                    }
+                    if (dailyDataMap.value.isEmpty()) {
                         dailyDataMap.value = buildLookupMapFromEntities(cachedDaily)
                     }
+                    if (!forceRefresh) {
+                        return@launch
+                    }
                 }
+                if (!forceRefresh) return@launch
+
                 val isOffline = isOfflineModeEnabled.value
                 val content = if (isOffline) getOfflineFileContent("url_3") else null
                 val url = if (!isOffline) url3.value else null
@@ -3178,7 +3305,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         syncJob = viewModelScope.launch(Dispatchers.IO) {
             isRefreshing.value = true
             errorMessage.value = null
-            
+
             val activeMenu = selectedMenu.value
             val isOffline = isOfflineModeEnabled.value
 
@@ -3204,364 +3331,379 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 return@launch
             }
 
-            if (activeMenu == "SIMPANAN") {
-                try {
-                    val di319List: List<com.example.data.model.Di319Row> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        if (isOffline) {
+            try {
+                SpreadsheetService.withSyncCsvCache {
+                    var anySyncResult: Result<Unit>? = null
+
+                    if (activeMenu == "SIMPANAN" && !force) {
+                        val di319List: List<com.example.data.model.Di319Row> = try {
+                            if (isOffline) {
+                                val di319OfflineContent = getOfflineFileContent("di319_url")
+                                if (!di319OfflineContent.isNullOrBlank()) {
+                                    SpreadsheetService.fetchDi319Data(null, di319OfflineContent)
+                                } else emptyList()
+                            } else {
+                                val url = di319Url.value
+                                if (url.isNotBlank()) SpreadsheetService.fetchDi319Data(url, null) else emptyList()
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("CustomerViewModel", "Failed to directly load di319 mapping", e)
+                            emptyList()
+                        }
+
+                        if (di319List.isNotEmpty()) {
+                            di319Rows.value = di319List
+                            repository.saveDi319Rows(di319List)
+                            isShowingCachedOfflineData.value = false
+                        } else {
+                            val cachedDi319 = repository.getCachedDi319RowsOnce()
+                            if (cachedDi319.isNotEmpty()) {
+                                di319Rows.value = cachedDi319
+                                isShowingCachedOfflineData.value = true
+                                val lastMeta = repository.getLastSyncMetadata()
+                                val timeStr = lastMeta?.let { formatSyncTimestamp(it.lastSyncedAt) }?.takeIf { it.isNotBlank() }
+                                errorMessage.value = if (timeStr != null) {
+                                    "Gagal menyegarkan Simpanan DI319. Menampilkan cache Room terakhir ($timeStr)."
+                                } else {
+                                    "Gagal menyegarkan Simpanan DI319. Menampilkan cache Room terakhir."
+                                }
+                            } else {
+                                errorMessage.value = "Gagal memuat data Simpanan DI319."
+                            }
+                        }
+                        return@withSyncCsvCache
+                    }
+
+                    val fetchMenu = if (activeMenu == "KELOLAAN" || activeMenu == "KUNJUNGAN" || activeMenu == "SIMPANAN") "INTRAKOMP" else activeMenu
+
+                    val syncIntra = force || fetchMenu == "INTRAKOMP"
+                    val syncEkstra = force || fetchMenu == "EKSTRAKOMP"
+
+                    // 1. Sync INTRAKOMP (or active custom menu)
+                    if (syncIntra || (fetchMenu != "INTRAKOMP" && fetchMenu != "EKSTRAKOMP")) {
+                        val offlineTargetContent = if (isOffline) {
+                            when (fetchMenu) {
+                                "INTRAKOMP" -> {
+                                    if (selectedBottomNav.value == "MONITORING" || selectedBottomNav.value == "KELOLAAN") {
+                                        getOfflineFileContent("url_2")
+                                    } else {
+                                        when {
+                                            selectedPeriodSource.value.startsWith("BULAN_") -> {
+                                                val m = selectedPeriodSource.value.removePrefix("BULAN_").toIntOrNull() ?: 1
+                                                getOfflineFileContent("lw321_all_$m") ?: getOfflineFileContent("url_2")
+                                            }
+                                            selectedPeriodSource.value == "BULAN_LALU" -> getOfflineFileContent("url_1")
+                                            selectedPeriodSource.value == "DAILY" -> getOfflineFileContent("url_3")
+                                            else -> getOfflineFileContent("url_2")
+                                        }
+                                    }
+                                }
+                                else -> getOfflineFileContent("k_url_1")
+                            }
+                        } else null
+
+                        val offlinePreviousMonthContent = if (isOffline && fetchMenu == "INTRAKOMP") getOfflineFileContent("url_1") else null
+                        val offlineLw321Content = if (isOffline && fetchMenu == "INTRAKOMP") getOfflineFileContent("url_4") else null
+                        val offlineKelolaanContent = if (isOffline && fetchMenu == "INTRAKOMP") getOfflineFileContent("k_url_1") else null
+
+                        val targetUrl = if (!isOffline) {
+                            when (fetchMenu) {
+                                "INTRAKOMP" -> {
+                                    if (selectedBottomNav.value == "MONITORING" || selectedBottomNav.value == "KELOLAAN") {
+                                        url2.value
+                                    } else {
+                                        when {
+                                            selectedPeriodSource.value.startsWith("BULAN_") -> {
+                                                val m = selectedPeriodSource.value.removePrefix("BULAN_").toIntOrNull() ?: 1
+                                                val monthUrl = lw321AllUrls[m]?.value ?: ""
+                                                if (monthUrl.isNotBlank()) monthUrl else url2.value
+                                            }
+                                            selectedPeriodSource.value == "BULAN_LALU" -> url1.value
+                                            selectedPeriodSource.value == "DAILY" -> url3.value
+                                            else -> url2.value
+                                        }
+                                    }
+                                }
+                                else -> customSpreadsheetUrl.value
+                            }
+                        } else null
+
+                        val previousMonthUrl = if (!isOffline && fetchMenu == "INTRAKOMP") {
+                            if (selectedBottomNav.value == "MONITORING" || selectedBottomNav.value == "KELOLAAN") {
+                                urlLw321BlnLalu.value
+                            } else if (selectedPeriodSource.value.startsWith("BULAN_")) {
+                                val m = selectedPeriodSource.value.removePrefix("BULAN_").toIntOrNull() ?: 1
+                                if (m > 1) lw321AllUrls[m - 1]?.value?.takeIf { it.isNotBlank() } ?: urlLw321BlnLalu.value else urlLw321BlnLalu.value
+                            } else {
+                                urlLw321BlnLalu.value
+                            }
+                        } else null
+
+                        val lw321Url = if (!isOffline && fetchMenu == "INTRAKOMP") url4.value else null
+                        val kelolaanUrl = if (!isOffline && fetchMenu == "INTRAKOMP") kUrl1.value else null
+
+                        val hasInput = if (isOffline) !offlineTargetContent.isNullOrBlank() else !targetUrl.isNullOrBlank()
+                        if (hasInput) {
+                            val intraResult = repository.refreshData(
+                                fetchMenu,
+                                targetUrl,
+                                previousMonthUrl,
+                                lw321Url,
+                                kelolaanUrl,
+                                null,
+                                offlineTargetContent,
+                                offlinePreviousMonthContent,
+                                offlineLw321Content,
+                                offlineKelolaanContent,
+                                null
+                            )
+                            anySyncResult = intraResult
+                            if (intraResult.isSuccess && fetchMenu == "INTRAKOMP" && selectedPeriodSource.value.startsWith("BULAN_")) {
+                                val m = selectedPeriodSource.value.removePrefix("BULAN_").toIntOrNull()
+                                if (m != null && m in 1..12) {
+                                    val freshIntra = repository.getCustomersFlow("INTRAKOMP").first()
+                                    if (freshIntra.isNotEmpty()) {
+                                        repository.savePeriodCustomers("PERIOD_LW321_ALL_$m", freshIntra)
+                                    }
+                                }
+                            }
+                        } else if (isOffline && !force) {
+                            errorMessage.value = "Mode Offline Aktif: Harap pilih/upload file CSV terlebih dahulu di menu popup Offline."
+                            return@withSyncCsvCache
+                        }
+                    }
+
+                    // 2. Sync EKSTRAKOMP (when active or full manual refresh)
+                    if (syncEkstra) {
+                        val extraTargetUrl = if (!isOffline) {
+                            if (eUrl1.value.isNotBlank()) eUrl1.value else urlLw325.value
+                        } else null
+                        val extraDbUrl = if (!isOffline) eUrl2.value else null
+                        val extraDailyUrl = if (!isOffline) lw325DailyUrl.value else null
+                        val offExtraTarget = if (isOffline) (getOfflineFileContent("e_url_1") ?: getOfflineFileContent("url_lw325")) else null
+                        val offExtraDb = if (isOffline) getOfflineFileContent("e_url_2") else null
+                        val offExtraDaily = if (isOffline) getOfflineFileContent("lw325_daily_url") else null
+
+                        val hasExtraInput = if (isOffline) !offExtraTarget.isNullOrBlank() else !extraTargetUrl.isNullOrBlank()
+                        if (hasExtraInput) {
+                            val ekstraResult = repository.refreshData(
+                                "EKSTRAKOMP",
+                                extraTargetUrl,
+                                null,
+                                extraDbUrl,
+                                null,
+                                extraDailyUrl,
+                                offExtraTarget,
+                                null,
+                                offExtraDb,
+                                null,
+                                offExtraDaily
+                            )
+                            if (anySyncResult == null || fetchMenu == "EKSTRAKOMP") {
+                                anySyncResult = ekstraResult
+                            }
+                        }
+                    }
+
+                    // 3. Refresh cached period snapshots (Daily, Bulan Lalu, Akhir Bulan, LW325 Daily) using deduplicated CSV cache
+                    try {
+                        val dMap = if (isOffline) {
+                            val dailyOfflineContent = getOfflineFileContent("url_3")
+                            if (!dailyOfflineContent.isNullOrBlank()) repository.getDailyInfo(null, dailyOfflineContent) else emptyMap()
+                        } else {
+                            val dailyUrl = url3.value
+                            if (dailyUrl.isNotBlank()) repository.getDailyInfo(dailyUrl, null) else emptyMap()
+                        }
+                        if (dMap.isNotEmpty()) {
+                            dailyDataMap.value = dMap
+                        }
+
+                        try {
+                            val blnLaluMap = if (isOffline) {
+                                val content = getOfflineFileContent("url_1")
+                                if (!content.isNullOrBlank()) repository.getDailyInfo(null, content) else emptyMap()
+                            } else {
+                                val url = url1.value
+                                if (url.isNotBlank()) repository.getDailyInfo(url, null) else emptyMap()
+                            }
+                            val uniqueBlnLalu = getDistinctCustomers(blnLaluMap)
+                            if (uniqueBlnLalu.isNotEmpty()) {
+                                repository.savePeriodCustomers("PERIOD_BULAN_LALU", uniqueBlnLalu)
+                                bulanLaluCustomers.value = uniqueBlnLalu
+                                summaryBulanLalu.value = UnitSummaryData(
+                                    os = uniqueBlnLalu.sumOf { it.osPinjaman },
+                                    debtors = uniqueBlnLalu.size
+                                )
+                                kolekSummaryBulanLalu.value = calculateKolekSummary(uniqueBlnLalu)
+                                mantriSummaryBulanLalu.value = calculateMantriSummaries(uniqueBlnLalu)
+                            } else if (bulanLaluCustomers.value.isEmpty()) {
+                                val cachedBlnLalu = repository.getCachedPeriodCustomers("PERIOD_BULAN_LALU")
+                                val fallbackList = if (cachedBlnLalu.isNotEmpty()) {
+                                    cachedBlnLalu
+                                } else {
+                                    val current = customersList.value.filter { it.menuType == "INTRAKOMP" }.ifEmpty { customersList.value }
+                                    current.map { cust ->
+                                        val bLalu = cust.kolekBlnLalu.ifBlank { cust.kolek }
+                                        cust.copy(kolek = bLalu)
+                                    }
+                                }
+                                if (fallbackList.isNotEmpty()) {
+                                    bulanLaluCustomers.value = fallbackList
+                                    summaryBulanLalu.value = UnitSummaryData(
+                                        os = fallbackList.sumOf { it.osPinjaman },
+                                        debtors = fallbackList.size
+                                    )
+                                    kolekSummaryBulanLalu.value = calculateKolekSummary(fallbackList)
+                                    mantriSummaryBulanLalu.value = calculateMantriSummaries(fallbackList)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("CustomerViewModel", "Failed to load bln lalu summary", e)
+                        }
+
+                        try {
+                            val akhirBlnMap = if (isOffline) {
+                                val content = getOfflineFileContent("url_2")
+                                if (!content.isNullOrBlank()) repository.getDailyInfo(null, content) else emptyMap()
+                            } else {
+                                val url = url2.value
+                                if (url.isNotBlank()) repository.getDailyInfo(url, null) else emptyMap()
+                            }
+                            val uniqueAkhirBln = getDistinctCustomers(akhirBlnMap)
+                            if (uniqueAkhirBln.isNotEmpty()) {
+                                repository.savePeriodCustomers("PERIOD_AKHIR_BULAN", uniqueAkhirBln)
+                                akhirBulanCustomers.value = uniqueAkhirBln
+                                summaryAkhirBulan.value = UnitSummaryData(
+                                    os = uniqueAkhirBln.sumOf { it.osPinjaman },
+                                    debtors = uniqueAkhirBln.size
+                                )
+                                kolekSummaryAkhirBulan.value = calculateKolekSummary(uniqueAkhirBln)
+                                mantriSummaryAkhirBulan.value = calculateMantriSummaries(uniqueAkhirBln)
+                            } else if (akhirBulanCustomers.value.isEmpty()) {
+                                val cachedAkhirBln = repository.getCachedPeriodCustomers("PERIOD_AKHIR_BULAN")
+                                val current = if (cachedAkhirBln.isNotEmpty()) {
+                                    cachedAkhirBln
+                                } else {
+                                    customersList.value.filter { it.menuType == "INTRAKOMP" }.ifEmpty { customersList.value }
+                                }
+                                if (current.isNotEmpty()) {
+                                    akhirBulanCustomers.value = current
+                                    summaryAkhirBulan.value = UnitSummaryData(
+                                        os = current.sumOf { it.osPinjaman },
+                                        debtors = current.size
+                                    )
+                                    kolekSummaryAkhirBulan.value = calculateKolekSummary(current)
+                                    mantriSummaryAkhirBulan.value = calculateMantriSummaries(current)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("CustomerViewModel", "Failed to load akhir bln summary", e)
+                        }
+
+                        try {
+                            val uniqueDaily = getDistinctCustomers(dMap)
+                            if (uniqueDaily.isNotEmpty()) {
+                                repository.savePeriodCustomers("PERIOD_DAILY", uniqueDaily)
+                                dailyCustomers.value = uniqueDaily
+                                summaryDaily.value = UnitSummaryData(
+                                    os = uniqueDaily.sumOf { it.osPinjaman },
+                                    debtors = uniqueDaily.size
+                                )
+                                kolekSummaryDaily.value = calculateKolekSummary(uniqueDaily)
+                                mantriSummaryDaily.value = calculateMantriSummaries(uniqueDaily)
+                            } else if (dailyCustomers.value.isEmpty()) {
+                                val cachedDaily = repository.getCachedPeriodCustomers("PERIOD_DAILY")
+                                if (cachedDaily.isNotEmpty()) {
+                                    dailyCustomers.value = cachedDaily
+                                    if (dailyDataMap.value.isEmpty()) {
+                                        dailyDataMap.value = buildLookupMapFromEntities(cachedDaily)
+                                    }
+                                    summaryDaily.value = UnitSummaryData(
+                                        os = cachedDaily.sumOf { it.osPinjaman },
+                                        debtors = cachedDaily.size
+                                    )
+                                    kolekSummaryDaily.value = calculateKolekSummary(cachedDaily)
+                                    mantriSummaryDaily.value = calculateMantriSummaries(cachedDaily)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("CustomerViewModel", "Failed to load daily summary", e)
+                        }
+
+                        fetchAndCacheLw325DailyCustomers(forceRefresh = true)
+
+                        // 4. Extract period dates from already-cached CSVs (zero duplicate network downloads)
+                        val periodKeysAndSources = listOf(
+                            Triple("period_date_bulan_lalu", periodDateBulanLalu, if (isOffline) getOfflineFileContent("url_1") else url1.value),
+                            Triple("period_date_akhir_bulan", periodDateAkhirBulan, if (isOffline) getOfflineFileContent("url_2") else url2.value),
+                            Triple("period_date_daily", periodDateDaily, if (isOffline) getOfflineFileContent("url_3") else url3.value),
+                            Triple("period_date_lw325", periodDateLw325, if (isOffline) getOfflineFileContent("e_url_1") else eUrl1.value)
+                        )
+                        periodKeysAndSources.forEach { (prefKey, stateFlow, src) ->
+                            if (!src.isNullOrBlank()) {
+                                val extracted = if (isOffline) {
+                                    extractDateFromCsvContent(src)
+                                } else {
+                                    extractB5DateFromUrlOrCache(src)
+                                }
+                                if (extracted.isNotBlank()) {
+                                    sharedPrefs.edit().putString(prefKey, extracted).apply()
+                                    stateFlow.value = extracted
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("CustomerViewModel", "Failed to load daily mapping", e)
+                    }
+
+                    // 5. Refresh DI319 savings rows
+                    try {
+                        val di319List: List<com.example.data.model.Di319Row> = if (isOffline) {
                             val di319OfflineContent = getOfflineFileContent("di319_url")
                             if (!di319OfflineContent.isNullOrBlank()) {
                                 SpreadsheetService.fetchDi319Data(null, di319OfflineContent)
-                            } else {
-                                emptyList()
-                            }
+                            } else emptyList()
                         } else {
                             val url = di319Url.value
-                            if (url.isNotBlank()) {
-                                SpreadsheetService.fetchDi319Data(url, null)
-                            } else {
-                                emptyList()
+                            if (url.isNotBlank()) SpreadsheetService.fetchDi319Data(url, null) else emptyList()
+                        }
+                        if (di319List.isNotEmpty()) {
+                            di319Rows.value = di319List
+                            repository.saveDi319Rows(di319List)
+                        } else if (di319Rows.value.isEmpty()) {
+                            val cachedDi319 = repository.getCachedDi319RowsOnce()
+                            if (cachedDi319.isNotEmpty()) {
+                                di319Rows.value = cachedDi319
                             }
                         }
+                    } catch (e: Exception) {
+                        android.util.Log.e("CustomerViewModel", "Failed to load di319 mapping", e)
                     }
-                    if (di319List.isNotEmpty()) {
-                        di319Rows.value = di319List
-                        repository.saveDi319Rows(di319List)
-                        isShowingCachedOfflineData.value = false
-                    } else {
-                        val cachedDi319 = repository.getCachedDi319RowsOnce()
-                        if (cachedDi319.isNotEmpty()) {
-                            di319Rows.value = cachedDi319
-                            isShowingCachedOfflineData.value = true
-                            val lastMeta = repository.getLastSyncMetadata()
-                            val timeStr = lastMeta?.let { formatSyncTimestamp(it.lastSyncedAt) }?.takeIf { it.isNotBlank() }
-                            errorMessage.value = if (timeStr != null) {
-                                "Gagal menyegarkan Simpanan DI319. Menampilkan cache Room terakhir ($timeStr)."
-                            } else {
-                                "Gagal menyegarkan Simpanan DI319. Menampilkan cache Room terakhir."
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("CustomerViewModel", "Failed to directly load di319 mapping", e)
-                    val cachedDi319 = repository.getCachedDi319RowsOnce()
-                    if (cachedDi319.isNotEmpty()) {
-                        di319Rows.value = cachedDi319
+
+                    persistCurrentSummaries()
+
+                    if (anySyncResult?.isFailure == true) {
                         isShowingCachedOfflineData.value = true
-                        errorMessage.value = "Koneksi bermasalah — menampilkan data Simpanan DI319 dari cache Room."
+                        val lastMeta = repository.getLastSyncMetadata()
+                        val timeStr = lastMeta?.let { formatSyncTimestamp(it.lastSyncedAt) }?.takeIf { it.isNotBlank() }
+                        errorMessage.value = if (isOffline) {
+                            "Gagal memuat data offline: " + (anySyncResult.exceptionOrNull()?.message ?: "Format CSV salah")
+                        } else if (timeStr != null) {
+                            "Koneksi terputus — menampilkan data cache Room terakhir ($timeStr)."
+                        } else {
+                            "Koneksi terputus — menampilkan data cache Room terakhir."
+                        }
                     } else {
-                        errorMessage.value = "Gagal memuat data Simpanan DI319: ${e.message}"
+                        isShowingCachedOfflineData.value = false
+                        val totalCached = repository.getTotalCustomersCount()
+                        if (totalCached > 0) {
+                            repository.updateGlobalSyncMetadata(totalCached, "ALL")
+                        }
                     }
                 }
+            } finally {
                 isRefreshing.value = false
-                return@launch
             }
-            
-            val fetchMenu = if (activeMenu == "KELOLAAN") "INTRAKOMP" else activeMenu
-            
-            var offlineTargetContent: String? = null
-            var offlinePreviousMonthContent: String? = null
-            var offlineLw321Content: String? = null
-            var offlineKelolaanContent: String? = null
-            
-            val targetUrl: String?
-            val previousMonthUrl: String?
-            val lw321Url: String?
-            val kelolaanUrl: String?
-            
-            if (isOffline) {
-                targetUrl = null
-                previousMonthUrl = null
-                lw321Url = null
-                kelolaanUrl = null
-                
-                offlineTargetContent = when (fetchMenu) {
-                    "INTRAKOMP" -> {
-                        if (selectedBottomNav.value == "MONITORING" || selectedBottomNav.value == "KELOLAAN") {
-                            getOfflineFileContent("url_2")
-                        } else {
-                            when {
-                                selectedPeriodSource.value.startsWith("BULAN_") -> {
-                                    val m = selectedPeriodSource.value.removePrefix("BULAN_").toIntOrNull() ?: 1
-                                    getOfflineFileContent("lw321_all_$m") ?: getOfflineFileContent("url_2")
-                                }
-                                selectedPeriodSource.value == "BULAN_LALU" -> getOfflineFileContent("url_1")
-                                selectedPeriodSource.value == "DAILY" -> getOfflineFileContent("url_3")
-                                else -> getOfflineFileContent("url_2") // "AKHIR_BULAN"
-                            }
-                        }
-                    }
-                    "EKSTRAKOMP" -> getOfflineFileContent("e_url_1") ?: getOfflineFileContent("url_lw325")
-                    else -> getOfflineFileContent("k_url_1")
-                }
-                
-                if (fetchMenu == "INTRAKOMP") {
-                    offlinePreviousMonthContent = getOfflineFileContent("url_1")
-                    offlineLw321Content = getOfflineFileContent("url_4")
-                    offlineKelolaanContent = getOfflineFileContent("k_url_1")
-                } else if (fetchMenu == "EKSTRAKOMP") {
-                    offlinePreviousMonthContent = null
-                    offlineLw321Content = getOfflineFileContent("e_url_2")
-                    offlineKelolaanContent = null
-                } else {
-                    offlinePreviousMonthContent = null
-                    offlineLw321Content = null
-                    offlineKelolaanContent = null
-                }
-            } else {
-                targetUrl = when (fetchMenu) {
-                    "INTRAKOMP" -> {
-                        if (selectedBottomNav.value == "MONITORING" || selectedBottomNav.value == "KELOLAAN") {
-                            url2.value
-                        } else {
-                            when {
-                                selectedPeriodSource.value.startsWith("BULAN_") -> {
-                                    val m = selectedPeriodSource.value.removePrefix("BULAN_").toIntOrNull() ?: 1
-                                    val monthUrl = lw321AllUrls[m]?.value ?: ""
-                                    if (monthUrl.isNotBlank()) monthUrl else url2.value
-                                }
-                                selectedPeriodSource.value == "BULAN_LALU" -> url1.value
-                                selectedPeriodSource.value == "DAILY" -> url3.value
-                                else -> url2.value // "AKHIR_BULAN"
-                            }
-                        }
-                    }
-                    "EKSTRAKOMP" -> {
-                        // Selalu mengambil data dari link monthly LW325 Akhir Bulan (e_url_1)
-                        if (eUrl1.value.isNotBlank()) eUrl1.value else urlLw325.value
-                    }
-                    else -> customSpreadsheetUrl.value
-                }
-                previousMonthUrl = if (fetchMenu == "INTRAKOMP") {
-                    if (selectedBottomNav.value == "MONITORING" || selectedBottomNav.value == "KELOLAAN") {
-                        urlLw321BlnLalu.value
-                    } else if (selectedPeriodSource.value.startsWith("BULAN_")) {
-                        val m = selectedPeriodSource.value.removePrefix("BULAN_").toIntOrNull() ?: 1
-                        if (m > 1) lw321AllUrls[m - 1]?.value?.takeIf { it.isNotBlank() } ?: urlLw321BlnLalu.value else urlLw321BlnLalu.value
-                    } else {
-                        urlLw321BlnLalu.value
-                    }
-                } else null
-                if (fetchMenu == "INTRAKOMP") {
-                    lw321Url = url4.value
-                    kelolaanUrl = kUrl1.value
-                } else if (fetchMenu == "EKSTRAKOMP") {
-                    lw321Url = eUrl2.value
-                    kelolaanUrl = null
-                } else {
-                    lw321Url = null
-                    kelolaanUrl = null
-                }
-            }
-            
-            if (!isOffline && (targetUrl == null || targetUrl.isBlank())) {
-                isRefreshing.value = false
-                return@launch
-            } else if (isOffline && (offlineTargetContent == null || offlineTargetContent.isBlank())) {
-                isRefreshing.value = false
-                errorMessage.value = "Mode Offline Aktif: Harap pilih/upload file CSV terlebih dahulu di menu popup Offline."
-                return@launch
-            }
-            
-            val result = repository.refreshData(
-                fetchMenu, 
-                targetUrl, 
-                previousMonthUrl, 
-                lw321Url,
-                kelolaanUrl,
-                if (fetchMenu == "EKSTRAKOMP") lw325DailyUrl.value else null,
-                offlineTargetContent,
-                offlinePreviousMonthContent,
-                offlineLw321Content,
-                offlineKelolaanContent,
-                if (fetchMenu == "EKSTRAKOMP") getOfflineFileContent("lw325_daily_url") else null
-            )
-            
-            try {
-                val dMap = if (isOffline) {
-                    val dailyOfflineContent = getOfflineFileContent("url_3")
-                    if (!dailyOfflineContent.isNullOrBlank()) {
-                        repository.getDailyInfo(null, dailyOfflineContent)
-                    } else {
-                        emptyMap()
-                    }
-                } else {
-                    val dailyUrl = url3.value
-                    if (dailyUrl.isNotBlank()) {
-                        repository.getDailyInfo(dailyUrl, null)
-                    } else {
-                        emptyMap()
-                    }
-                }
-                if (dMap.isNotEmpty()) {
-                    dailyDataMap.value = dMap
-                }
-                fetchPeriodDates()
-                
-                try {
-                    val blnLaluMap = if (isOffline) {
-                        val content = getOfflineFileContent("url_1")
-                        if (!content.isNullOrBlank()) repository.getDailyInfo(null, content) else emptyMap()
-                    } else {
-                        val url = url1.value
-                        if (url.isNotBlank()) repository.getDailyInfo(url, null) else emptyMap()
-                    }
-                    val uniqueBlnLalu = getDistinctCustomers(blnLaluMap)
-                    if (uniqueBlnLalu.isNotEmpty()) {
-                        repository.savePeriodCustomers("PERIOD_BULAN_LALU", uniqueBlnLalu)
-                        bulanLaluCustomers.value = uniqueBlnLalu
-                        summaryBulanLalu.value = UnitSummaryData(
-                            os = uniqueBlnLalu.sumOf { it.osPinjaman },
-                            debtors = uniqueBlnLalu.size
-                        )
-                        kolekSummaryBulanLalu.value = calculateKolekSummary(uniqueBlnLalu)
-                        mantriSummaryBulanLalu.value = calculateMantriSummaries(uniqueBlnLalu)
-                    } else if (bulanLaluCustomers.value.isEmpty()) {
-                        val cachedBlnLalu = repository.getCachedPeriodCustomers("PERIOD_BULAN_LALU")
-                        val fallbackList = if (cachedBlnLalu.isNotEmpty()) {
-                            cachedBlnLalu
-                        } else {
-                            val current = customersList.value.filter { it.menuType == "INTRAKOMP" }.ifEmpty { customersList.value }
-                            current.map { cust ->
-                                val bLalu = cust.kolekBlnLalu.ifBlank { cust.kolek }
-                                cust.copy(kolek = bLalu)
-                            }
-                        }
-                        if (fallbackList.isNotEmpty()) {
-                            bulanLaluCustomers.value = fallbackList
-                            summaryBulanLalu.value = UnitSummaryData(
-                                os = fallbackList.sumOf { it.osPinjaman },
-                                debtors = fallbackList.size
-                            )
-                            kolekSummaryBulanLalu.value = calculateKolekSummary(fallbackList)
-                            mantriSummaryBulanLalu.value = calculateMantriSummaries(fallbackList)
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("CustomerViewModel", "Failed to load bln lalu summary", e)
-                }
-
-                try {
-                    val akhirBlnMap = if (isOffline) {
-                        val content = getOfflineFileContent("url_2")
-                        if (!content.isNullOrBlank()) repository.getDailyInfo(null, content) else emptyMap()
-                    } else {
-                        val url = url2.value
-                        if (url.isNotBlank()) repository.getDailyInfo(url, null) else emptyMap()
-                    }
-                    val uniqueAkhirBln = getDistinctCustomers(akhirBlnMap)
-                    if (uniqueAkhirBln.isNotEmpty()) {
-                        repository.savePeriodCustomers("PERIOD_AKHIR_BULAN", uniqueAkhirBln)
-                        akhirBulanCustomers.value = uniqueAkhirBln
-                        summaryAkhirBulan.value = UnitSummaryData(
-                            os = uniqueAkhirBln.sumOf { it.osPinjaman },
-                            debtors = uniqueAkhirBln.size
-                        )
-                        kolekSummaryAkhirBulan.value = calculateKolekSummary(uniqueAkhirBln)
-                        mantriSummaryAkhirBulan.value = calculateMantriSummaries(uniqueAkhirBln)
-                    } else if (akhirBulanCustomers.value.isEmpty()) {
-                        val cachedAkhirBln = repository.getCachedPeriodCustomers("PERIOD_AKHIR_BULAN")
-                        val current = if (cachedAkhirBln.isNotEmpty()) {
-                            cachedAkhirBln
-                        } else {
-                            customersList.value.filter { it.menuType == "INTRAKOMP" }.ifEmpty { customersList.value }
-                        }
-                        if (current.isNotEmpty()) {
-                            akhirBulanCustomers.value = current
-                            summaryAkhirBulan.value = UnitSummaryData(
-                                os = current.sumOf { it.osPinjaman },
-                                debtors = current.size
-                            )
-                            kolekSummaryAkhirBulan.value = calculateKolekSummary(current)
-                            mantriSummaryAkhirBulan.value = calculateMantriSummaries(current)
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("CustomerViewModel", "Failed to load akhir bln summary", e)
-                }
-
-                try {
-                    val uniqueDaily = getDistinctCustomers(dMap)
-                    if (uniqueDaily.isNotEmpty()) {
-                        repository.savePeriodCustomers("PERIOD_DAILY", uniqueDaily)
-                        dailyCustomers.value = uniqueDaily
-                        summaryDaily.value = UnitSummaryData(
-                            os = uniqueDaily.sumOf { it.osPinjaman },
-                            debtors = uniqueDaily.size
-                        )
-                        kolekSummaryDaily.value = calculateKolekSummary(uniqueDaily)
-                        mantriSummaryDaily.value = calculateMantriSummaries(uniqueDaily)
-                    } else if (dailyCustomers.value.isEmpty()) {
-                        val cachedDaily = repository.getCachedPeriodCustomers("PERIOD_DAILY")
-                        if (cachedDaily.isNotEmpty()) {
-                            dailyCustomers.value = cachedDaily
-                            if (dailyDataMap.value.isEmpty()) {
-                                dailyDataMap.value = buildLookupMapFromEntities(cachedDaily)
-                            }
-                            summaryDaily.value = UnitSummaryData(
-                                os = cachedDaily.sumOf { it.osPinjaman },
-                                debtors = cachedDaily.size
-                            )
-                            kolekSummaryDaily.value = calculateKolekSummary(cachedDaily)
-                            mantriSummaryDaily.value = calculateMantriSummaries(cachedDaily)
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("CustomerViewModel", "Failed to load daily summary", e)
-                }
-
-                fetchAndCacheLw325DailyCustomers(forceRefresh = true)
-            } catch (e: Exception) {
-                android.util.Log.e("CustomerViewModel", "Failed to load daily mapping", e)
-            }
-
-            try {
-                val di319List: List<com.example.data.model.Di319Row> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    if (isOffline) {
-                        val di319OfflineContent = getOfflineFileContent("di319_url")
-                        if (!di319OfflineContent.isNullOrBlank()) {
-                            SpreadsheetService.fetchDi319Data(null, di319OfflineContent)
-                        } else {
-                            emptyList()
-                        }
-                    } else {
-                        val url = di319Url.value
-                        if (url.isNotBlank()) {
-                            SpreadsheetService.fetchDi319Data(url, null)
-                        } else {
-                            emptyList()
-                        }
-                    }
-                }
-                if (di319List.isNotEmpty()) {
-                    di319Rows.value = di319List
-                    repository.saveDi319Rows(di319List)
-                } else if (di319Rows.value.isEmpty()) {
-                    val cachedDi319 = repository.getCachedDi319RowsOnce()
-                    if (cachedDi319.isNotEmpty()) {
-                        di319Rows.value = cachedDi319
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("CustomerViewModel", "Failed to load di319 mapping", e)
-            }
-
-            persistCurrentSummaries()
-
-            if (result.isFailure) {
-                isShowingCachedOfflineData.value = true
-                val lastMeta = repository.getLastSyncMetadata()
-                val timeStr = lastMeta?.let { formatSyncTimestamp(it.lastSyncedAt) }?.takeIf { it.isNotBlank() }
-                errorMessage.value = if (isOffline) {
-                    "Gagal memuat data offline: " + (result.exceptionOrNull()?.message ?: "Format CSV salah")
-                } else if (timeStr != null) {
-                    "Koneksi terputus — menampilkan data cache Room terakhir ($timeStr)."
-                } else {
-                    "Koneksi terputus — menampilkan data cache Room terakhir."
-                }
-            } else {
-                isShowingCachedOfflineData.value = false
-            }
-            isRefreshing.value = false
         }
     }
 
