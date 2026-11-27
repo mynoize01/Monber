@@ -1,13 +1,12 @@
 package com.example.ui.components
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
@@ -85,7 +84,7 @@ fun CurvedAnimatedBottomBar(
         targetValue = selectedIndex.toFloat(),
         animationSpec = spring(
             dampingRatio = 0.84f,
-            stiffness = Spring.StiffnessMediumLow
+            stiffness = 420f
         ),
         label = "curved_nav_animated_index"
     )
@@ -233,13 +232,19 @@ fun CurvedAnimatedBottomBar(
             AnimatedContent(
                 targetState = activeItem,
                 transitionSpec = {
-                    (fadeIn(animationSpec = tween(160)) + scaleIn(
-                        initialScale = 0.75f,
-                        animationSpec = tween(190)
-                    )) togetherWith (fadeOut(animationSpec = tween(110)) + scaleOut(
-                        targetScale = 0.75f,
-                        animationSpec = tween(120)
-                    ))
+                    scaleIn(
+                        initialScale = 0.72f,
+                        animationSpec = spring(
+                            dampingRatio = 0.78f,
+                            stiffness = 500f
+                        )
+                    ) togetherWith scaleOut(
+                        targetScale = 0.72f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = 550f
+                        )
+                    ) using SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> snap() })
                 },
                 label = "floating_circle_icon"
             ) { currentItem ->
@@ -265,27 +270,27 @@ fun CurvedAnimatedBottomBar(
 
                 val iconAlphaState = animateFloatAsState(
                     targetValue = if (isSelected) 0f else 1f,
-                    animationSpec = tween(durationMillis = 160),
+                    animationSpec = snap(),
                     label = "nav_icon_alpha_${item.id}"
                 )
                 val iconScaleState = animateFloatAsState(
                     targetValue = if (isSelected) 0.55f else 1f,
-                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 360f),
+                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
                     label = "nav_icon_scale_${item.id}"
                 )
                 val iconOffsetYPxState = animateFloatAsState(
                     targetValue = if (isSelected) with(density) { (-14).dp.toPx() } else 0f,
-                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 360f),
+                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
                     label = "nav_icon_offset_${item.id}"
                 )
                 val labelColor by animateColorAsState(
                     targetValue = if (isSelected) activeColor else inactiveColor,
-                    animationSpec = tween(durationMillis = 200),
+                    animationSpec = spring(stiffness = Spring.StiffnessMedium),
                     label = "nav_label_color_${item.id}"
                 )
                 val labelScaleState = animateFloatAsState(
                     targetValue = if (isSelected) 1.05f else 1f,
-                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 360f),
+                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
                     label = "nav_label_scale_${item.id}"
                 )
 

@@ -5,6 +5,8 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -435,7 +437,17 @@ fun SettingsScreenView(
                     }
 
                     // Konten 3 Kategori Link (LW321 All, Monthly, Daily)
-                    AnimatedVisibility(visible = isInputLinkSelected) {
+                    AnimatedVisibility(
+                        visible = isInputLinkSelected,
+                        enter = expandVertically(
+                            expandFrom = Alignment.Top,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                        ),
+                        exit = shrinkVertically(
+                            shrinkTowards = Alignment.Top,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                        )
+                    ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -843,8 +855,14 @@ fun SettingsScreenView(
 
                     AnimatedVisibility(
                         visible = isCalculatorExpanded,
-                        enter = expandVertically() + fadeIn(),
-                        exit = shrinkVertically() + fadeOut()
+                        enter = expandVertically(
+                            expandFrom = Alignment.Top,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                        ),
+                        exit = shrinkVertically(
+                            shrinkTowards = Alignment.Top,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                        )
                     ) {
                         Column(
                             modifier = Modifier

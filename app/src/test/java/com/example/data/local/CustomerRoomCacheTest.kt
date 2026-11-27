@@ -34,7 +34,9 @@ class CustomerRoomCacheTest {
         repository = CustomerRepository(
             customerDao = db.customerDao(),
             di319Dao = db.di319Dao(),
-            syncMetadataDao = db.syncMetadataDao()
+            syncMetadataDao = db.syncMetadataDao(),
+            cachedSummaryDao = db.cachedSummaryDao(),
+            monthlyHistoryDao = db.monthlyHistoryDao()
         )
     }
 
@@ -155,5 +157,34 @@ class CustomerRoomCacheTest {
         assertEquals(1, cached.size)
         assertEquals(1_500_000.0, cached.first().saldo, 0.01)
         assertEquals("DI319", repository.getLastSyncMetadata()?.label)
+    }
+
+    @Test
+    fun summaryJson_and_monthlyHistory_cachedAndQueriedOfflineInRoom() = runBlocking {
+        val sampleJson = """{"summaryDaily":{"os":15000000.0,"debtors":12}}"""
+        repository.saveSummaryJson("DASHBOARD_SUMMARIES", sampleJson)
+
+        val restoredJson = repository.getSummaryJsonOnce("DASHBOARD_SUMMARIES")
+        assertEquals(sampleJson, restoredJson)
+
+        repository.saveMonthlyHistory(
+            month = 5,
+            kolekMap = mapOf("123456789012345" to "SML1", "CIF001" to "SML1"),
+            tunggakanMap = mapOf("123456789012345" to 250_000.0)
+        )
+        repository.saveMonthlyHistory(
+            month = 6,
+            kolekMap = mapOf("123456789012345" to "Lancar"),
+            tunggakanMap = mapOf("123456789012345" to 0.0)
+        )
+
+        val cachedMonths = repository.getCachedHistoryMonthsOnce()
+        assertTrue(5 in cachedMonths && 6 in cachedMonths)
+
+        val (kolekHistory, tgkHistory) = repository.getCustomerMonthlyHistoryOnce(listOf("123456789012345", "CIF001"))
+        assertEquals("SML1", kolekHistory[5])
+        assertEquals("Lancar", kolekHistory[6])
+        assertEquals(250_000.0, tgkHistory[5] ?: 0.0, 0.01)
+        assertEquals(0.0, tgkHistory[6] ?: -1.0, 0.01)
     }
 }

@@ -59,10 +59,34 @@ data class MantriDetailData(
     val npl: UnitSummaryData = UnitSummaryData()
 )
 
+data class RealisasiCustomerItem(
+    val namaNasabah: String,
+    val noRekening: String,
+    val tglReal: String,
+    val realisasi: Double,
+    val netDisburs: Double,
+    val namaMantri: String,
+    val segmen: String
+)
+
+data class RealisasiNetMetrics(
+    val realisasi: Double = 0.0,
+    val netDisburs: Double = 0.0,
+    val debtors: Int = 0,
+    val customers: List<RealisasiCustomerItem> = emptyList()
+)
+
+data class MonthlyRealisasiSnapshot(
+    val unit: RealisasiNetMetrics = RealisasiNetMetrics(),
+    val byMantri: Map<String, RealisasiNetMetrics> = emptyMap(),
+    val hasData: Boolean = false
+)
+
 data class ToggleFilters(
     val sp: Boolean,
     val tus: Boolean,
     val tuc: Boolean,
+    val tg6: Boolean,
     val jt: Boolean,
     val jtH: Int = 0
 )
@@ -91,6 +115,7 @@ data class FilterParams(
     val setorPokok: Boolean = false,
     val tusim: Boolean = false,
     val tucil: Boolean = false,
+    val tunggakanKurang6Bln: Boolean = false,
     val jatuhTempoOnly: Boolean = false,
     val jatuhTempoH: Int = 0,
     val desa: String = "SEMUA"
@@ -134,7 +159,9 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     private val repository = CustomerRepository(
         database.customerDao(),
         database.di319Dao(),
-        database.syncMetadataDao()
+        database.syncMetadataDao(),
+        database.cachedSummaryDao(),
+        database.monthlyHistoryDao()
     )
 
     private val sharedPrefs = application.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
@@ -280,6 +307,13 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     val lastSyncMetadata: StateFlow<com.example.data.model.SyncMetadataEntity?> =
         repository.observeLastSyncMetadata()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    val isNetworkConnected: StateFlow<Boolean> =
+        repository.observeNetworkConnectivity(application)
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.Eagerly,
+                initialValue = repository.isNetworkAvailable(application)
+            )
     val isShowingCachedOfflineData = MutableStateFlow(false)
     val isRefreshing = MutableStateFlow(false)
     val errorMessage = MutableStateFlow<String?>(null)
@@ -290,6 +324,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     val dashboardMonthlySummary = MutableStateFlow<Map<Int, UnitSummaryData>>(emptyMap())
     val dashboardMonthlyKolekSummary = MutableStateFlow<Map<Int, KolekSummaryData>>(emptyMap())
     val dashboardMonthlyMantriSummary = MutableStateFlow<Map<Int, Map<String, MantriDetailData>>>(emptyMap())
+    val dashboardMonthlyRealisasi = MutableStateFlow<Map<Int, MonthlyRealisasiSnapshot>>(emptyMap())
 
     // Independent Filter Mantri per Menu
     val filterMantriDashboard = MutableStateFlow("SEMUA")
@@ -671,33 +706,31 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                         val content = if (isOffline) getOfflineFileContent("url_3") else null
                         val url = if (!isOffline) url3.value else null
                         val canFetch = (!content.isNullOrBlank()) || (!url.isNullOrBlank() && hasNetwork)
-                        if (canFetch) {
-                            val map = repository.getDailyInfo(url, content)
-                            val unique = getDistinctCustomers(map)
-                            if (map.isNotEmpty() && unique.isNotEmpty()) {
-                                dailyDataMap.value = map
-                                repository.savePeriodCustomers("PERIOD_DAILY", unique)
-                                dailyCustomers.value = unique
-                                summaryDaily.value = UnitSummaryData(
-                                    os = unique.sumOf { it.osPinjaman },
-                                    debtors = unique.size
-                                )
-                                kolekSummaryDaily.value = calculateKolekSummary(unique)
-                                mantriSummaryDaily.value = calculateMantriSummaries(unique)
-                            } else if (dailyCustomers.value.isEmpty()) {
-                                val cachedDaily = repository.getCachedPeriodCustomers("PERIOD_DAILY")
-                                if (cachedDaily.isNotEmpty()) {
-                                    dailyCustomers.value = cachedDaily
-                                    if (dailyDataMap.value.isEmpty()) {
-                                        dailyDataMap.value = buildLookupMapFromEntities(cachedDaily)
-                                    }
-                                    summaryDaily.value = UnitSummaryData(
-                                        os = cachedDaily.sumOf { it.osPinjaman },
-                                        debtors = cachedDaily.size
-                                    )
-                                    kolekSummaryDaily.value = calculateKolekSummary(cachedDaily)
-                                    mantriSummaryDaily.value = calculateMantriSummaries(cachedDaily)
+                        val map = if (canFetch) repository.getDailyInfo(url, content) else emptyMap()
+                        val unique = getDistinctCustomers(map)
+                        if (map.isNotEmpty() && unique.isNotEmpty()) {
+                            dailyDataMap.value = map
+                            repository.savePeriodCustomers("PERIOD_DAILY", unique)
+                            dailyCustomers.value = unique
+                            summaryDaily.value = UnitSummaryData(
+                                os = unique.sumOf { it.osPinjaman },
+                                debtors = unique.size
+                            )
+                            kolekSummaryDaily.value = calculateKolekSummary(unique)
+                            mantriSummaryDaily.value = calculateMantriSummaries(unique)
+                        } else if (dailyCustomers.value.isEmpty() || dailyDataMap.value.isEmpty()) {
+                            val cachedDaily = repository.getCachedPeriodCustomers("PERIOD_DAILY")
+                            if (cachedDaily.isNotEmpty()) {
+                                dailyCustomers.value = cachedDaily
+                                if (dailyDataMap.value.isEmpty()) {
+                                    dailyDataMap.value = buildLookupMapFromEntities(cachedDaily)
                                 }
+                                summaryDaily.value = UnitSummaryData(
+                                    os = cachedDaily.sumOf { it.osPinjaman },
+                                    debtors = cachedDaily.size
+                                )
+                                kolekSummaryDaily.value = calculateKolekSummary(cachedDaily)
+                                mantriSummaryDaily.value = calculateMantriSummaries(cachedDaily)
                             }
                         }
                     } catch (e: Exception) {
@@ -899,6 +932,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                     dashboardMonthlyMantriSummary.value = updatedMantri
                     persistCurrentSummaries()
                 }
+                recomputeMonthlyRealisasiChartInternal()
             } catch (e: Exception) {
                 android.util.Log.e("CustomerViewModel", "Failed to batch load 12-month chart data", e)
             } finally {
@@ -907,51 +941,294 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun refreshMonthlyRealisasiChart() {
+        viewModelScope.launch(Dispatchers.IO) {
+            recomputeMonthlyRealisasiChartInternal()
+        }
+    }
+
+    private suspend fun recomputeMonthlyRealisasiChartInternal() {
+        try {
+            val dailyList = dailyCustomers.value
+            val akhirList = akhirBulanCustomers.value
+            val blnLaluList = bulanLaluCustomers.value
+            val intraList = repository.getCustomersFlow("INTRAKOMP").first()
+            val activePool = dailyList.ifEmpty { akhirList }.ifEmpty { intraList }
+
+            fun parseYm(dateStr: String): Pair<Int, Int>? {
+                val parsed = DateTenorUtils.parseYearMonthDay(dateStr) ?: return null
+                return parsed.first to parsed.second
+            }
+
+            fun extractTglRealRaw(cust: CustomerEntity): String {
+                return cust.tglReal.ifBlank {
+                    cust.extraColumns.split("||")
+                        .firstOrNull { part ->
+                            part.startsWith("Tgl Real::", ignoreCase = true) ||
+                                part.startsWith("Tgl Realisasi::", ignoreCase = true) ||
+                                part.startsWith("TGL_REAL::", ignoreCase = true)
+                        }
+                        ?.substringAfter("::")
+                        ?.trim()
+                        ?: ""
+                }
+            }
+
+            fun extractTglRealYm(cust: CustomerEntity): Pair<Int, Int>? {
+                return parseYm(extractTglRealRaw(cust))
+            }
+
+            val cal = java.util.Calendar.getInstance()
+            val fallbackY = cal.get(java.util.Calendar.YEAR)
+            val fallbackM = cal.get(java.util.Calendar.MONTH) + 1
+
+            val dailyYm = if (dailyList.isNotEmpty()) parseYm(periodDateDaily.value) else null
+            val akhirYm = if (akhirList.isNotEmpty()) parseYm(periodDateAkhirBulan.value) else null
+            val blnLaluYm = if (blnLaluList.isNotEmpty()) parseYm(periodDateBulanLalu.value) else null
+
+            val (endY, endM) = dailyYm ?: akhirYm ?: blnLaluYm ?: (fallbackY to fallbackM)
+
+            val cachedAllByMonth = mutableMapOf<Int, List<CustomerEntity>>()
+            for (m in 1..12) {
+                val cached = repository.getCachedPeriodCustomers("PERIOD_LW321_ALL_$m")
+                if (cached.isNotEmpty()) {
+                    cachedAllByMonth[m] = cached
+                }
+            }
+
+            fun shiftMonth(year: Int, month: Int, delta: Int): Pair<Int, Int> {
+                val totalMonths = year * 12 + (month - 1) + delta
+                val y = totalMonths.floorDiv(12)
+                val m = (totalMonths % 12 + 12) % 12 + 1
+                return y to m
+            }
+
+            val resultMap = mutableMapOf<Int, MonthlyRealisasiSnapshot>()
+
+            for (offset in -11..0) {
+                val (yr, mo) = shiftMonth(endY, endM, offset)
+                val (prevYr, prevMo) = shiftMonth(yr, mo, -1)
+
+                val currSnap = when {
+                    dailyYm == (yr to mo) && dailyList.isNotEmpty() -> dailyList
+                    akhirYm == (yr to mo) && akhirList.isNotEmpty() -> akhirList
+                    blnLaluYm == (yr to mo) && blnLaluList.isNotEmpty() -> blnLaluList
+                    else -> {
+                        val monthCache = cachedAllByMonth[mo]
+                        if (monthCache != null && monthCache.any { extractTglRealYm(it) == (yr to mo) }) {
+                            monthCache
+                        } else {
+                            activePool
+                        }
+                    }
+                }
+
+                val realizedInMonth = currSnap.filter { extractTglRealYm(it) == (yr to mo) }
+                if (realizedInMonth.isEmpty()) {
+                    resultMap[yr * 100 + mo] = MonthlyRealisasiSnapshot(hasData = false)
+                    continue
+                }
+
+                val prevBaseline: List<CustomerEntity> = when {
+                    akhirYm == (prevYr to prevMo) && akhirList.isNotEmpty() -> akhirList
+                    blnLaluYm == (prevYr to prevMo) && blnLaluList.isNotEmpty() -> blnLaluList
+                    dailyYm == (yr to mo) && akhirList.isNotEmpty() && akhirYm != (yr to mo) -> akhirList
+                    akhirYm == (yr to mo) && blnLaluList.isNotEmpty() && blnLaluYm != (yr to mo) -> blnLaluList
+                    else -> {
+                        val prevCache = cachedAllByMonth[prevMo]
+                        if (prevCache != null && prevCache !== currSnap) prevCache else emptyList()
+                    }
+                }
+
+                val blnLookup = mutableMapOf<String, CustomerEntity>()
+                val blnNameMap = mutableMapOf<String, CustomerEntity>()
+                val blnNameCount = mutableMapOf<String, Int>()
+
+                if (prevBaseline.isNotEmpty()) {
+                    for (bCust in prevBaseline) {
+                        val rawRek = bCust.noRekening.trim()
+                        if (rawRek.isNotBlank()) blnLookup[rawRek] = bCust
+                        val cr = rawRek.filter { it.isDigit() }
+                        if (cr.isNotBlank()) {
+                            blnLookup[cr] = bCust
+                            val noZero = cr.trimStart('0')
+                            if (noZero.isNotBlank()) blnLookup[noZero] = bCust
+                            if (cr.length >= 15) blnLookup[cr.takeLast(15)] = bCust
+                        }
+                        val formattedRek = SpreadsheetService.formatRekening15(bCust.noRekening)
+                        if (formattedRek.isNotBlank()) blnLookup[formattedRek] = bCust
+                        val rawCif = bCust.cif.trim()
+                        if (rawCif.isNotBlank()) blnLookup[rawCif] = bCust
+                        val cc = rawCif.filter { it.isLetterOrDigit() }.dropWhile { it == '0' }
+                        if (cc.isNotBlank()) {
+                            blnLookup[cc] = bCust
+                            blnLookup["CIF-$cc"] = bCust
+                        }
+                        val cleanName = bCust.namaNasabah.trim().lowercase()
+                        val cleanMantri = cleanMantriNameOnly(bCust.namaMantri).lowercase()
+                        if (cleanName.isNotBlank() && cleanMantri.isNotBlank()) {
+                            blnLookup["$cleanName|$cleanMantri"] = bCust
+                        }
+                        if (cleanName.isNotBlank()) {
+                            blnNameMap[cleanName] = bCust
+                            blnNameCount[cleanName] = (blnNameCount[cleanName] ?: 0) + 1
+                        }
+                    }
+                }
+
+                fun findPrevCust(cust: CustomerEntity): CustomerEntity? {
+                    if (prevBaseline.isEmpty()) return null
+                    val rawRek = cust.noRekening.trim()
+                    val cr = rawRek.filter { it.isDigit() }
+                    val noZero = cr.trimStart('0')
+                    val formattedRek = SpreadsheetService.formatRekening15(cust.noRekening)
+                    val rawCif = cust.cif.trim()
+                    val cc = rawCif.filter { it.isLetterOrDigit() }.dropWhile { it == '0' }
+                    val cleanName = cust.namaNasabah.trim().lowercase()
+                    val cleanMantri = cleanMantriNameOnly(cust.namaMantri).lowercase()
+
+                    val match = blnLookup[rawRek]
+                        ?: (if (cr.isNotBlank()) blnLookup[cr] else null)
+                        ?: (if (noZero.isNotBlank()) blnLookup[noZero] else null)
+                        ?: (if (cr.length >= 15) blnLookup[cr.takeLast(15)] else null)
+                        ?: (if (formattedRek.isNotBlank()) blnLookup[formattedRek] else null)
+                        ?: (if (rawCif.isNotBlank()) blnLookup[rawCif] else null)
+                        ?: (if (cc.isNotBlank()) blnLookup[cc] ?: blnLookup["CIF-$cc"] else null)
+                        ?: (if (cleanName.isNotBlank() && cleanMantri.isNotBlank()) blnLookup["$cleanName|$cleanMantri"] else null)
+                        ?: (if (cleanName.isNotBlank() && blnNameCount[cleanName] == 1) blnNameMap[cleanName] else null)
+
+                    if (match != null && match.noRekening.isNotBlank() && match.noRekening == cust.noRekening && match.tglReal == cust.tglReal) {
+                        return null
+                    }
+                    return match
+                }
+
+                var unitReal = 0.0
+                var unitNet = 0.0
+                var unitDeb = 0
+                val unitCustomerList = mutableListOf<RealisasiCustomerItem>()
+                val mantriAcc = mutableMapOf<String, Triple<Double, Double, Int>>()
+                val mantriCustomerLists = mutableMapOf<String, MutableList<RealisasiCustomerItem>>()
+
+                for (cust in realizedInMonth) {
+                    val realAmt = cust.plafond
+                    val prev = findPrevCust(cust)
+                    val netAmt = if (prev == null) realAmt else (realAmt - prev.osPinjaman)
+
+                    unitReal += realAmt
+                    unitNet += netAmt
+                    unitDeb++
+
+                    val mName = cleanMantriNameOnly(cust.namaMantri)
+                    val pName = cleanMantriNameOnly(cust.namaMantriPrakarsa)
+                    val targetName = when {
+                        mName.isNotBlank() && mName != "Blank PN" && mName != "TANPA NAMA" -> mName
+                        pName.isNotBlank() && pName != "Blank PN" && pName != "TANPA NAMA" -> pName
+                        else -> "Blank PN"
+                    }
+                    val item = RealisasiCustomerItem(
+                        namaNasabah = cust.namaNasabah.trim().ifBlank { "Tanpa Nama" },
+                        noRekening = cust.noRekening.trim(),
+                        tglReal = extractTglRealRaw(cust),
+                        realisasi = realAmt,
+                        netDisburs = netAmt,
+                        namaMantri = targetName,
+                        segmen = cust.segmen.trim()
+                    )
+                    unitCustomerList.add(item)
+                    mantriCustomerLists.getOrPut(targetName) { mutableListOf() }.add(item)
+
+                    val old = mantriAcc[targetName]
+                    mantriAcc[targetName] = if (old == null) {
+                        Triple(realAmt, netAmt, 1)
+                    } else {
+                        Triple(old.first + realAmt, old.second + netAmt, old.third + 1)
+                    }
+                }
+
+                val itemComparator = compareByDescending<RealisasiCustomerItem> { it.realisasi }
+                    .thenBy { it.namaNasabah.lowercase() }
+
+                resultMap[yr * 100 + mo] = MonthlyRealisasiSnapshot(
+                    unit = RealisasiNetMetrics(
+                        realisasi = unitReal,
+                        netDisburs = unitNet,
+                        debtors = unitDeb,
+                        customers = unitCustomerList.sortedWith(itemComparator)
+                    ),
+                    byMantri = mantriAcc.mapValues { (mantriKey, t) ->
+                        RealisasiNetMetrics(
+                            realisasi = t.first,
+                            netDisburs = t.second,
+                            debtors = t.third,
+                            customers = mantriCustomerLists[mantriKey]?.sortedWith(itemComparator).orEmpty()
+                        )
+                    },
+                    hasData = unitDeb > 0
+                )
+            }
+
+            dashboardMonthlyRealisasi.value = resultMap
+        } catch (e: Exception) {
+            android.util.Log.e("CustomerViewModel", "Failed to recompute monthly realisasi chart", e)
+        }
+    }
+
     /**
-     * Load cached summaries and 12-month kolek history from local storage immediately on app open.
+     * Load cached summaries, period datasets, DI319 savings, and 12-month history from Room immediately on app open.
+     * Transparently migrates any pre-existing legacy file caches into Room on first run.
      */
     fun loadLocalCachedData() {
-        try {
-            val cached = LocalSummaryCache.loadSummaries(getApplication())
-            if (cached != null) {
-                if (cached.summaryBulanLalu.debtors > 0) summaryBulanLalu.value = cached.summaryBulanLalu
-                if (cached.summaryAkhirBulan.debtors > 0) summaryAkhirBulan.value = cached.summaryAkhirBulan
-                if (cached.summaryDaily.debtors > 0) summaryDaily.value = cached.summaryDaily
-
-                if (cached.kolekSummaryBulanLalu.lancar.debtors > 0 || cached.kolekSummaryBulanLalu.npl.debtors > 0) {
-                    kolekSummaryBulanLalu.value = cached.kolekSummaryBulanLalu
-                }
-                if (cached.kolekSummaryAkhirBulan.lancar.debtors > 0 || cached.kolekSummaryAkhirBulan.npl.debtors > 0) {
-                    kolekSummaryAkhirBulan.value = cached.kolekSummaryAkhirBulan
-                }
-                if (cached.kolekSummaryDaily.lancar.debtors > 0 || cached.kolekSummaryDaily.npl.debtors > 0) {
-                    kolekSummaryDaily.value = cached.kolekSummaryDaily
-                }
-
-                if (cached.mantriSummaryBulanLalu.isNotEmpty()) mantriSummaryBulanLalu.value = cached.mantriSummaryBulanLalu
-                if (cached.mantriSummaryAkhirBulan.isNotEmpty()) mantriSummaryAkhirBulan.value = cached.mantriSummaryAkhirBulan
-                if (cached.mantriSummaryDaily.isNotEmpty()) mantriSummaryDaily.value = cached.mantriSummaryDaily
-
-                if (cached.dashboardMonthlySummary.isNotEmpty()) dashboardMonthlySummary.value = cached.dashboardMonthlySummary
-                if (cached.dashboardMonthlyKolekSummary.isNotEmpty()) dashboardMonthlyKolekSummary.value = cached.dashboardMonthlyKolekSummary
-                if (cached.dashboardMonthlyMantriSummary.isNotEmpty()) dashboardMonthlyMantriSummary.value = cached.dashboardMonthlyMantriSummary
-            }
-
-            val cachedKolekMaps = LocalSummaryCache.loadAllMonthlyKolekMaps(getApplication())
-            if (cachedKolekMaps.isNotEmpty()) {
-                monthlyLw321KolekCache.putAll(cachedKolekMaps)
-            }
-            val cachedTunggakanMaps = LocalSummaryCache.loadAllMonthlyTunggakanMaps(getApplication())
-            if (cachedTunggakanMaps.isNotEmpty()) {
-                monthlyLw321TunggakanCache.putAll(cachedTunggakanMaps)
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("CustomerViewModel", "Error loading local cached summaries", e)
-        }
-
-        // Hydrate Room-backed datasets immediately on background IO thread so offline startup is seamless
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                // 1. Load pre-computed dashboard & period summaries from Room (fallback migrate from legacy JSON file)
+                val roomSummaryJson = repository.getSummaryJsonOnce("DASHBOARD_SUMMARIES")
+                val cached = if (!roomSummaryJson.isNullOrBlank()) {
+                    LocalSummaryCache.deserializeSummaries(roomSummaryJson)
+                } else {
+                    LocalSummaryCache.loadSummaries(getApplication())?.also { legacy ->
+                        val payload = LocalSummaryCache.serializeSummaries(
+                            summaryBulanLalu = legacy.summaryBulanLalu,
+                            summaryAkhirBulan = legacy.summaryAkhirBulan,
+                            summaryDaily = legacy.summaryDaily,
+                            kolekSummaryBulanLalu = legacy.kolekSummaryBulanLalu,
+                            kolekSummaryAkhirBulan = legacy.kolekSummaryAkhirBulan,
+                            kolekSummaryDaily = legacy.kolekSummaryDaily,
+                            mantriSummaryBulanLalu = legacy.mantriSummaryBulanLalu,
+                            mantriSummaryAkhirBulan = legacy.mantriSummaryAkhirBulan,
+                            mantriSummaryDaily = legacy.mantriSummaryDaily,
+                            dashboardMonthlySummary = legacy.dashboardMonthlySummary,
+                            dashboardMonthlyKolekSummary = legacy.dashboardMonthlyKolekSummary,
+                            dashboardMonthlyMantriSummary = legacy.dashboardMonthlyMantriSummary
+                        )
+                        repository.saveSummaryJson("DASHBOARD_SUMMARIES", payload)
+                    }
+                }
+                if (cached != null) {
+                    if (cached.summaryBulanLalu.debtors > 0) summaryBulanLalu.value = cached.summaryBulanLalu
+                    if (cached.summaryAkhirBulan.debtors > 0) summaryAkhirBulan.value = cached.summaryAkhirBulan
+                    if (cached.summaryDaily.debtors > 0) summaryDaily.value = cached.summaryDaily
+
+                    if (cached.kolekSummaryBulanLalu.lancar.debtors > 0 || cached.kolekSummaryBulanLalu.npl.debtors > 0) {
+                        kolekSummaryBulanLalu.value = cached.kolekSummaryBulanLalu
+                    }
+                    if (cached.kolekSummaryAkhirBulan.lancar.debtors > 0 || cached.kolekSummaryAkhirBulan.npl.debtors > 0) {
+                        kolekSummaryAkhirBulan.value = cached.kolekSummaryAkhirBulan
+                    }
+                    if (cached.kolekSummaryDaily.lancar.debtors > 0 || cached.kolekSummaryDaily.npl.debtors > 0) {
+                        kolekSummaryDaily.value = cached.kolekSummaryDaily
+                    }
+
+                    if (cached.mantriSummaryBulanLalu.isNotEmpty()) mantriSummaryBulanLalu.value = cached.mantriSummaryBulanLalu
+                    if (cached.mantriSummaryAkhirBulan.isNotEmpty()) mantriSummaryAkhirBulan.value = cached.mantriSummaryAkhirBulan
+                    if (cached.mantriSummaryDaily.isNotEmpty()) mantriSummaryDaily.value = cached.mantriSummaryDaily
+
+                    if (cached.dashboardMonthlySummary.isNotEmpty()) dashboardMonthlySummary.value = cached.dashboardMonthlySummary
+                    if (cached.dashboardMonthlyKolekSummary.isNotEmpty()) dashboardMonthlyKolekSummary.value = cached.dashboardMonthlyKolekSummary
+                    if (cached.dashboardMonthlyMantriSummary.isNotEmpty()) dashboardMonthlyMantriSummary.value = cached.dashboardMonthlyMantriSummary
+                }
+
+                // 2. Hydrate Room-backed datasets immediately for seamless offline startup
                 val cachedDi319 = repository.getCachedDi319RowsOnce()
                 if (cachedDi319.isNotEmpty() && di319Rows.value.isEmpty()) {
                     di319Rows.value = cachedDi319
@@ -1009,6 +1286,50 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 if (cachedLw325Daily.isNotEmpty() && lw325DailyCustomers.value.isEmpty()) {
                     lw325DailyCustomers.value = cachedLw325Daily.map { it.copy(menuType = "EKSTRAKOMP") }
                 }
+
+                // 3. Hydrate any missing monthly chart summaries from Room PERIOD_LW321_ALL_1..12
+                val updatedSummary = dashboardMonthlySummary.value.toMutableMap()
+                val updatedKolek = dashboardMonthlyKolekSummary.value.toMutableMap()
+                val updatedMantri = dashboardMonthlyMantriSummary.value.toMutableMap()
+                var monthlyChanged = false
+                for (m in 1..12) {
+                    if (!updatedSummary.containsKey(m) || !updatedKolek.containsKey(m)) {
+                        val cachedMonth = repository.getCachedPeriodCustomers("PERIOD_LW321_ALL_$m")
+                        if (cachedMonth.isNotEmpty()) {
+                            updatedSummary[m] = UnitSummaryData(
+                                os = cachedMonth.sumOf { it.osPinjaman },
+                                debtors = cachedMonth.size
+                            )
+                            updatedKolek[m] = calculateKolekSummary(cachedMonth)
+                            updatedMantri[m] = calculateMantriSummaries(cachedMonth)
+                            monthlyChanged = true
+                        }
+                    }
+                }
+                if (monthlyChanged) {
+                    dashboardMonthlySummary.value = updatedSummary
+                    dashboardMonthlyKolekSummary.value = updatedKolek
+                    dashboardMonthlyMantriSummary.value = updatedMantri
+                }
+                recomputeMonthlyRealisasiChartInternal()
+
+                // 4. Hydrate / migrate 12-month history caches from Room MonthlyHistoryDao
+                val cachedHistoryMonths = repository.getCachedHistoryMonthsOnce()
+                for (m in 1..12) {
+                    if (m in cachedHistoryMonths) {
+                        val (kMap, tMap) = repository.getMonthlyHistoryMapsOnce(m)
+                        if (kMap.isNotEmpty()) monthlyLw321KolekCache[m] = kMap
+                        if (tMap.isNotEmpty()) monthlyLw321TunggakanCache[m] = tMap
+                    } else {
+                        val legacyKolek = LocalSummaryCache.loadMonthlyKolekMap(getApplication(), m).orEmpty()
+                        val legacyTgk = LocalSummaryCache.loadMonthlyTunggakanMap(getApplication(), m).orEmpty()
+                        if (legacyKolek.isNotEmpty() || legacyTgk.isNotEmpty()) {
+                            if (legacyKolek.isNotEmpty()) monthlyLw321KolekCache[m] = legacyKolek
+                            if (legacyTgk.isNotEmpty()) monthlyLw321TunggakanCache[m] = legacyTgk
+                            repository.saveMonthlyHistory(m, legacyKolek, legacyTgk)
+                        }
+                    }
+                }
             } catch (e: Exception) {
                 android.util.Log.e("CustomerViewModel", "Error loading Room cached datasets", e)
             }
@@ -1062,55 +1383,71 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * Persist current calculated summary metrics to local storage so they appear instantly on next open.
+     * Persist current calculated summary metrics to Room (CachedSummaryEntity) so they appear instantly on next open.
      */
     fun persistCurrentSummaries() {
-        try {
-            LocalSummaryCache.saveSummaries(
-                context = getApplication(),
-                summaryBulanLalu = summaryBulanLalu.value,
-                summaryAkhirBulan = summaryAkhirBulan.value,
-                summaryDaily = summaryDaily.value,
-                kolekSummaryBulanLalu = kolekSummaryBulanLalu.value,
-                kolekSummaryAkhirBulan = kolekSummaryAkhirBulan.value,
-                kolekSummaryDaily = kolekSummaryDaily.value,
-                mantriSummaryBulanLalu = mantriSummaryBulanLalu.value,
-                mantriSummaryAkhirBulan = mantriSummaryAkhirBulan.value,
-                mantriSummaryDaily = mantriSummaryDaily.value,
-                dashboardMonthlySummary = dashboardMonthlySummary.value,
-                dashboardMonthlyKolekSummary = dashboardMonthlyKolekSummary.value,
-                dashboardMonthlyMantriSummary = dashboardMonthlyMantriSummary.value
-            )
-        } catch (e: Exception) {
-            android.util.Log.e("CustomerViewModel", "Error persisting summaries", e)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val payload = LocalSummaryCache.serializeSummaries(
+                    summaryBulanLalu = summaryBulanLalu.value,
+                    summaryAkhirBulan = summaryAkhirBulan.value,
+                    summaryDaily = summaryDaily.value,
+                    kolekSummaryBulanLalu = kolekSummaryBulanLalu.value,
+                    kolekSummaryAkhirBulan = kolekSummaryAkhirBulan.value,
+                    kolekSummaryDaily = kolekSummaryDaily.value,
+                    mantriSummaryBulanLalu = mantriSummaryBulanLalu.value,
+                    mantriSummaryAkhirBulan = mantriSummaryAkhirBulan.value,
+                    mantriSummaryDaily = mantriSummaryDaily.value,
+                    dashboardMonthlySummary = dashboardMonthlySummary.value,
+                    dashboardMonthlyKolekSummary = dashboardMonthlyKolekSummary.value,
+                    dashboardMonthlyMantriSummary = dashboardMonthlyMantriSummary.value
+                )
+                repository.saveSummaryJson("DASHBOARD_SUMMARIES", payload)
+            } catch (e: Exception) {
+                android.util.Log.e("CustomerViewModel", "Error persisting summaries to Room", e)
+            }
         }
     }
 
     /**
-     * Prefetch all 12 months for LW321 and save to local storage.
-     * Skips network calls if monthly kolek map is already cached locally.
+     * Prefetch all 12 months for LW321 and save to Room MonthlyHistoryEntity.
+     * Skips network calls if monthly history is already cached in Room.
      */
-    fun prefetchAllMonthlyKolek(forceRefresh: Boolean = false) {
+    suspend fun prefetchAllMonthlyKolek(forceRefresh: Boolean = false) {
         val isOffline = isOfflineModeEnabled.value
+        val hasNetwork = isOffline || repository.isNetworkAvailable(getApplication())
         for (m in 1..12) {
             try {
                 var existingKolek = monthlyLw321KolekCache[m]
+                var existingTgk = monthlyLw321TunggakanCache[m]
+                if (existingKolek == null || existingTgk == null) {
+                    val (roomKolek, roomTgk) = repository.getMonthlyHistoryMapsOnce(m)
+                    if (existingKolek == null && roomKolek.isNotEmpty()) {
+                        existingKolek = roomKolek
+                        monthlyLw321KolekCache[m] = roomKolek
+                    }
+                    if (existingTgk == null && roomTgk.isNotEmpty()) {
+                        existingTgk = roomTgk
+                        monthlyLw321TunggakanCache[m] = roomTgk
+                    }
+                }
                 if (existingKolek == null) {
                     existingKolek = LocalSummaryCache.loadMonthlyKolekMap(getApplication(), m)
-                    if (existingKolek != null && existingKolek.isNotEmpty()) {
+                    if (!existingKolek.isNullOrEmpty()) {
                         monthlyLw321KolekCache[m] = existingKolek
                     }
                 }
-                var existingTgk = monthlyLw321TunggakanCache[m]
                 if (existingTgk == null) {
                     existingTgk = LocalSummaryCache.loadMonthlyTunggakanMap(getApplication(), m)
-                    if (existingTgk != null && existingTgk.isNotEmpty()) {
+                    if (!existingTgk.isNullOrEmpty()) {
                         monthlyLw321TunggakanCache[m] = existingTgk
                     }
                 }
-                if (!forceRefresh && existingKolek != null && existingKolek.isNotEmpty() && existingTgk != null && existingTgk.isNotEmpty()) {
-                    continue // Skip network download if both caches are already populated
+                if (!forceRefresh && !existingKolek.isNullOrEmpty() && !existingTgk.isNullOrEmpty()) {
+                    continue
                 }
+                if (!hasNetwork) continue
+
                 val url = lw321AllUrls[m]?.value ?: ""
                 val offlineContent = if (isOffline) {
                     getOfflineFileContent("lw321_all_$m") ?: getOfflineFileContent("url_2")
@@ -1121,13 +1458,10 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                         if (isOffline) null else url,
                         offlineContent
                     )
-                    if (fetchedKolek.isNotEmpty()) {
-                        monthlyLw321KolekCache[m] = fetchedKolek
-                        LocalSummaryCache.saveMonthlyKolekMap(getApplication(), m, fetchedKolek)
-                    }
-                    if (fetchedTgk.isNotEmpty()) {
-                        monthlyLw321TunggakanCache[m] = fetchedTgk
-                        LocalSummaryCache.saveMonthlyTunggakanMap(getApplication(), m, fetchedTgk)
+                    if (fetchedKolek.isNotEmpty() || fetchedTgk.isNotEmpty()) {
+                        if (fetchedKolek.isNotEmpty()) monthlyLw321KolekCache[m] = fetchedKolek
+                        if (fetchedTgk.isNotEmpty()) monthlyLw321TunggakanCache[m] = fetchedTgk
+                        repository.saveMonthlyHistory(m, fetchedKolek, fetchedTgk)
                     }
                 }
             } catch (e: Exception) {
@@ -1137,8 +1471,8 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * Load Kolek and Tunggakan across all 12 months for a specific customer from memory/local storage cache instantly.
-     * When forceRefresh is true, re-fetch fresh data from Google Sheets/network.
+     * Load Kolek and Tunggakan across all 12 months for a specific customer from memory / Room MonthlyHistory cache.
+     * Queries Room directly with indexed account keys when offline or cached; fetches from Google Sheets only when online & needed.
      */
     fun loadMonthlyKolekForCustomer(noRekening: String, cif: String, forceRefresh: Boolean = false) {
         val currentKey = "${noRekening.trim()}|${cif.trim()}"
@@ -1149,115 +1483,157 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         }
         viewModelScope.launch(Dispatchers.IO) {
             isMonthlyKolekLoading.value = true
-            val cleanRek = noRekening.filter { it.isDigit() }
-            val noZeroRek = cleanRek.trimStart('0')
-            val cleanCif = cif.filter { it.isLetterOrDigit() }.dropWhile { it == '0' }
-            val formattedRek = SpreadsheetService.formatRekening15(noRekening)
-            val isOffline = isOfflineModeEnabled.value
+            try {
+                val cleanRek = noRekening.filter { it.isDigit() }
+                val noZeroRek = cleanRek.trimStart('0')
+                val cleanCif = cif.filter { it.isLetterOrDigit() }.dropWhile { it == '0' }
+                val formattedRek = SpreadsheetService.formatRekening15(noRekening)
+                val lookupKeys = listOfNotNull(
+                    cleanRek.takeIf { it.isNotBlank() },
+                    formattedRek.takeIf { it.isNotBlank() },
+                    noZeroRek.takeIf { it.isNotBlank() },
+                    cleanRek.takeIf { it.length >= 15 }?.takeLast(15),
+                    cleanCif.takeIf { it.isNotBlank() },
+                    cleanCif.takeIf { it.isNotBlank() }?.let { "CIF-$it" }
+                ).distinct()
 
-            val resultMap = mutableMapOf<Int, String>()
-            val tunggakanResultMap = mutableMapOf<Int, Double?>()
+                val isOffline = isOfflineModeEnabled.value
+                val hasNetwork = isOffline || repository.isNetworkAvailable(getApplication())
 
-            for (m in 1..12) {
-                var monthMap = if (forceRefresh) null else monthlyLw321KolekCache[m]
-                if (monthMap == null && !forceRefresh) {
-                    monthMap = LocalSummaryCache.loadMonthlyKolekMap(getApplication(), m)
-                    if (monthMap != null) {
-                        monthlyLw321KolekCache[m] = monthMap
+                // Fast indexed SQLite lookup from Room first
+                val (roomCustKolek, roomCustTgk) = if (!forceRefresh) {
+                    repository.getCustomerMonthlyHistoryOnce(lookupKeys)
+                } else (emptyMap<Int, String>() to emptyMap<Int, Double?>())
+                val cachedMonthsInRoom = if (!forceRefresh) {
+                    repository.getCachedHistoryMonthsOnce()
+                } else emptySet()
+
+                val resultMap = mutableMapOf<Int, String>()
+                val tunggakanResultMap = mutableMapOf<Int, Double?>()
+
+                for (m in 1..12) {
+                    if (!forceRefresh && m in cachedMonthsInRoom) {
+                        resultMap[m] = roomCustKolek[m] ?: "-"
+                        tunggakanResultMap[m] = roomCustTgk[m]
+                        continue
                     }
-                }
 
-                var tgkMap = if (forceRefresh) null else monthlyLw321TunggakanCache[m]
-                if (tgkMap == null && !forceRefresh) {
-                    tgkMap = LocalSummaryCache.loadMonthlyTunggakanMap(getApplication(), m)
-                    if (tgkMap != null) {
-                        monthlyLw321TunggakanCache[m] = tgkMap
-                    }
-                }
+                    var monthMap = if (forceRefresh) null else monthlyLw321KolekCache[m]
+                    var tgkMap = if (forceRefresh) null else monthlyLw321TunggakanCache[m]
 
-                if (monthMap == null || tgkMap == null) {
-                    val url = lw321AllUrls[m]?.value ?: ""
-                    val offlineContent = if (isOffline) {
-                        getOfflineFileContent("lw321_all_$m") ?: getOfflineFileContent("url_2")
-                    } else null
-
-                    if (url.isNotBlank() || !offlineContent.isNullOrBlank()) {
-                        val (fetchedKolek, fetchedTgk) = SpreadsheetService.fetchLw321MonthlyKolekAndTunggakanMaps(
-                            if (isOffline) null else url,
-                            offlineContent
-                        )
-                        if (fetchedKolek.isNotEmpty()) {
-                            monthMap = fetchedKolek
-                            monthlyLw321KolekCache[m] = fetchedKolek
-                            LocalSummaryCache.saveMonthlyKolekMap(getApplication(), m, fetchedKolek)
+                    if (!forceRefresh && (monthMap == null || tgkMap == null)) {
+                        val (roomKolekMap, roomTgkMap) = repository.getMonthlyHistoryMapsOnce(m)
+                        if (monthMap == null && roomKolekMap.isNotEmpty()) {
+                            monthMap = roomKolekMap
+                            monthlyLw321KolekCache[m] = roomKolekMap
                         }
-                        if (fetchedTgk.isNotEmpty()) {
-                            tgkMap = fetchedTgk
-                            monthlyLw321TunggakanCache[m] = fetchedTgk
-                            LocalSummaryCache.saveMonthlyTunggakanMap(getApplication(), m, fetchedTgk)
+                        if (tgkMap == null && roomTgkMap.isNotEmpty()) {
+                            tgkMap = roomTgkMap
+                            monthlyLw321TunggakanCache[m] = roomTgkMap
                         }
                     }
+
+                    if (monthMap == null && !forceRefresh) {
+                        monthMap = LocalSummaryCache.loadMonthlyKolekMap(getApplication(), m)
+                        if (!monthMap.isNullOrEmpty()) monthlyLw321KolekCache[m] = monthMap
+                    }
+                    if (tgkMap == null && !forceRefresh) {
+                        tgkMap = LocalSummaryCache.loadMonthlyTunggakanMap(getApplication(), m)
+                        if (!tgkMap.isNullOrEmpty()) monthlyLw321TunggakanCache[m] = tgkMap
+                    }
+
+                    if ((monthMap == null || tgkMap == null || forceRefresh) && hasNetwork) {
+                        val url = lw321AllUrls[m]?.value ?: ""
+                        val offlineContent = if (isOffline) {
+                            getOfflineFileContent("lw321_all_$m") ?: getOfflineFileContent("url_2")
+                        } else null
+
+                        if (url.isNotBlank() || !offlineContent.isNullOrBlank()) {
+                            val (fetchedKolek, fetchedTgk) = SpreadsheetService.fetchLw321MonthlyKolekAndTunggakanMaps(
+                                if (isOffline) null else url,
+                                offlineContent
+                            )
+                            if (fetchedKolek.isNotEmpty() || fetchedTgk.isNotEmpty()) {
+                                if (fetchedKolek.isNotEmpty()) {
+                                    monthMap = fetchedKolek
+                                    monthlyLw321KolekCache[m] = fetchedKolek
+                                }
+                                if (fetchedTgk.isNotEmpty()) {
+                                    tgkMap = fetchedTgk
+                                    monthlyLw321TunggakanCache[m] = fetchedTgk
+                                }
+                                repository.saveMonthlyHistory(m, fetchedKolek, fetchedTgk)
+                            }
+                        }
+                    }
+
+                    val foundKolek = monthMap?.let { map ->
+                        lookupKeys.firstNotNullOfOrNull { k -> map[k] }
+                    } ?: "-"
+                    val foundTgk = tgkMap?.let { map ->
+                        lookupKeys.firstNotNullOfOrNull { k -> map[k] }
+                    }
+
+                    resultMap[m] = foundKolek
+                    tunggakanResultMap[m] = foundTgk
                 }
 
-                val foundKolek = monthMap?.let { map ->
-                    map[cleanRek]
-                        ?: map[formattedRek]
-                        ?: (if (noZeroRek.isNotBlank()) map[noZeroRek] else null)
-                        ?: (if (cleanRek.length >= 15) map[cleanRek.takeLast(15)] else null)
-                        ?: map[cleanCif]
-                        ?: map["CIF-$cleanCif"]
-                } ?: "-"
-
-                val foundTgk = tgkMap?.let { map ->
-                    map[cleanRek]
-                        ?: map[formattedRek]
-                        ?: (if (noZeroRek.isNotBlank()) map[noZeroRek] else null)
-                        ?: (if (cleanRek.length >= 15) map[cleanRek.takeLast(15)] else null)
-                        ?: map[cleanCif]
-                        ?: map["CIF-$cleanCif"]
-                }
-
-                resultMap[m] = foundKolek
-                tunggakanResultMap[m] = foundTgk
+                monthlyKolekHistory.value = resultMap
+                monthlyTunggakanHistory.value = tunggakanResultMap
+            } catch (e: Exception) {
+                android.util.Log.e("CustomerViewModel", "Failed to load monthly customer history", e)
+            } finally {
+                isMonthlyKolekLoading.value = false
             }
-
-            monthlyKolekHistory.value = resultMap
-            monthlyTunggakanHistory.value = tunggakanResultMap
-            isMonthlyKolekLoading.value = false
         }
     }
 
     /**
      * Load prior month's Kolek map from LW321 All (e.g. if report month is 8 -> load month 7).
-     * Cached in monthlyLw321KolekCache and LocalSummaryCache to ensure smooth instant UI without stutter.
+     * Cached in memory and Room MonthlyHistoryDao for instant offline access.
      */
     fun loadPriorMonthLw321KolekMap(month: Int) {
         if (month !in 1..12) return
-        var cached = monthlyLw321KolekCache[month]
-        if (cached == null) {
-            cached = LocalSummaryCache.loadMonthlyKolekMap(getApplication(), month)
-            if (cached != null) {
-                monthlyLw321KolekCache[month] = cached
-            }
-        }
-        if (cached != null && cached.isNotEmpty()) {
-            priorMonthLw321KolekMap.value = cached
+        val inMemory = monthlyLw321KolekCache[month]
+        if (!inMemory.isNullOrEmpty()) {
+            priorMonthLw321KolekMap.value = inMemory
             return
         }
 
         viewModelScope.launch(Dispatchers.IO) {
+            val (roomKolek, _) = repository.getMonthlyHistoryMapsOnce(month)
+            if (roomKolek.isNotEmpty()) {
+                monthlyLw321KolekCache[month] = roomKolek
+                priorMonthLw321KolekMap.value = roomKolek
+                return@launch
+            }
+
+            val legacyCached = LocalSummaryCache.loadMonthlyKolekMap(getApplication(), month)
+            if (!legacyCached.isNullOrEmpty()) {
+                monthlyLw321KolekCache[month] = legacyCached
+                priorMonthLw321KolekMap.value = legacyCached
+                repository.saveMonthlyHistory(month, legacyCached, LocalSummaryCache.loadMonthlyTunggakanMap(getApplication(), month).orEmpty())
+                return@launch
+            }
+
             val isOffline = isOfflineModeEnabled.value
+            if (!isOffline && !repository.isNetworkAvailable(getApplication())) {
+                return@launch
+            }
             val url = lw321AllUrls[month]?.value ?: ""
             val offlineContent = if (isOffline) {
                 getOfflineFileContent("lw321_all_$month") ?: getOfflineFileContent("url_2")
             } else null
 
             if (url.isNotBlank() || !offlineContent.isNullOrBlank()) {
-                val fetchedMap = SpreadsheetService.fetchLw321MonthlyKolekMap(if (isOffline) null else url, offlineContent)
-                if (fetchedMap.isNotEmpty()) {
-                    monthlyLw321KolekCache[month] = fetchedMap
-                    LocalSummaryCache.saveMonthlyKolekMap(getApplication(), month, fetchedMap)
-                    priorMonthLw321KolekMap.value = fetchedMap
+                val (fetchedKolek, fetchedTgk) = SpreadsheetService.fetchLw321MonthlyKolekAndTunggakanMaps(
+                    if (isOffline) null else url,
+                    offlineContent
+                )
+                if (fetchedKolek.isNotEmpty()) {
+                    monthlyLw321KolekCache[month] = fetchedKolek
+                    priorMonthLw321KolekMap.value = fetchedKolek
+                    repository.saveMonthlyHistory(month, fetchedKolek, fetchedTgk)
                 }
             }
         }
@@ -1852,6 +2228,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             .putBoolean("filter_${menu}_setor_pokok", filters.setorPokok)
             .putBoolean("filter_${menu}_tusim", filters.tusim)
             .putBoolean("filter_${menu}_tucil", filters.tucil)
+            .putBoolean("filter_${menu}_tg_kurang_6_bln", filters.tunggakanKurang6Bln)
             .putBoolean("filter_${menu}_jt_only", filters.jatuhTempoOnly)
             .putInt("filter_${menu}_jt_h", filters.jatuhTempoH)
             .putString("filter_${menu}_desa", filters.desa)
@@ -1876,6 +2253,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             setorPokok = sharedPrefs.getBoolean("filter_${menu}_setor_pokok", false),
             tusim = sharedPrefs.getBoolean("filter_${menu}_tusim", false),
             tucil = sharedPrefs.getBoolean("filter_${menu}_tucil", false),
+            tunggakanKurang6Bln = sharedPrefs.getBoolean("filter_${menu}_tg_kurang_6_bln", false),
             jatuhTempoOnly = sharedPrefs.getBoolean("filter_${menu}_jt_only", false),
             jatuhTempoH = sharedPrefs.getInt("filter_${menu}_jt_h", 0),
             desa = sharedPrefs.getString("filter_${menu}_desa", "SEMUA") ?: "SEMUA"
@@ -1905,6 +2283,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     val filterSetorPokok = MutableStateFlow(initialFilters.setorPokok)
     val filterTusim = MutableStateFlow(initialFilters.tusim)
     val filterTucil = MutableStateFlow(initialFilters.tucil)
+    val filterTunggakanKurang6Bln = MutableStateFlow(initialFilters.tunggakanKurang6Bln)
     val filterJatuhTempoOnly = MutableStateFlow(initialFilters.jatuhTempoOnly)
     val selectedJatuhTempoH = MutableStateFlow(initialFilters.jatuhTempoH)
     val filterDesa = MutableStateFlow(initialFilters.desa)
@@ -1967,8 +2346,14 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         combine(filterBulanLunas, filterTahunLunas, filterOS) { b, t, o -> Triple(b, t, o) },
         combine(filterPlafondRange, filterTenorRange, filterSegmen) { p, t, seg -> Triple(p, t, seg) },
         combine(filterKolekUpdate, filterNpd, filterAlamat, filterKolekBlnLalu, filterDesa) { ku, npd, al, kbl, des -> listOf(ku, npd, al, kbl, des) },
-        combine(filterSetorPokok, filterTusim, filterTucil, filterJatuhTempoOnly, selectedJatuhTempoH) { sp, tus, tuc, jt, jh ->
-            ToggleFilters(sp, tus, tuc, jt, jh)
+        combine(
+            filterSetorPokok,
+            filterTusim,
+            filterTucil,
+            filterTunggakanKurang6Bln,
+            combine(filterJatuhTempoOnly, selectedJatuhTempoH) { jt, jh -> jt to jh }
+        ) { sp, tus, tuc, tg6, jtPair ->
+            ToggleFilters(sp, tus, tuc, tg6, jtPair.first, jtPair.second)
         }
     ) { group1, group2, group3, group4, group5 ->
         FilterParams(
@@ -1988,6 +2373,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             setorPokok = group5.sp,
             tusim = group5.tus,
             tucil = group5.tuc,
+            tunggakanKurang6Bln = group5.tg6,
             jatuhTempoOnly = group5.jt,
             jatuhTempoH = group5.jtH,
             desa = group4[4]
@@ -2146,6 +2532,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         val setorPokok = filterParams.setorPokok
         val tusim = filterParams.tusim
         val tucil = filterParams.tucil
+        val tunggakanKurang6Bln = filterParams.tunggakanKurang6Bln
         
         var filteredList = rawList
         
@@ -2255,49 +2642,90 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             }
         }
 
-        // 1e. Tusim & Tucil filters (diatur kemudian - can be toggled but currently does not filter out any data)
+        fun resolveDailyForCust(cust: com.example.data.model.CustomerEntity): com.example.data.model.CustomerEntity? {
+            if (dMap.isEmpty()) return null
+            val rawRek = cust.noRekening.trim()
+            val cleanRek = rawRek.filter { it.isDigit() }
+            val noZeroRek = cleanRek.trimStart('0')
+            val formatted15 = com.example.data.network.SpreadsheetService.formatRekening15(rawRek)
+            return dMap[rawRek]
+                ?: (if (cleanRek.isNotBlank()) dMap[cleanRek] else null)
+                ?: (if (noZeroRek.isNotBlank()) dMap[noZeroRek] else null)
+                ?: (if (formatted15.isNotBlank()) dMap[formatted15] else null)
+        }
+
+        // 1e. Tusim, Tucil <100 rb, & Tunggakan <6 bln filters
         if (tusim) {
             val normalizeCifLocal = { rawCif: String ->
                 var str = rawCif.trim().uppercase()
-                if (str.startsWith("CIF")) {
-                    str = str.substring(3).trim()
-                }
-                if (str.startsWith("-")) {
-                    str = str.substring(1).trim()
-                }
-                str = str.filter { it.isLetterOrDigit() }
-                str = str.dropWhile { it == '0' }
-                str
+                if (str.startsWith("CIF")) str = str.substring(3).trim()
+                if (str.startsWith("-")) str = str.substring(1).trim()
+                str.filter { it.isLetterOrDigit() }.dropWhile { it == '0' }
             }
-            
+            val maxSaldoByNormCif = mutableMapOf<String, Double>()
+            for (row in di319List) {
+                val norm = normalizeCifLocal(row.cif)
+                if (norm.isNotEmpty()) {
+                    val prev = maxSaldoByNormCif[norm] ?: 0.0
+                    if (row.saldo > prev) maxSaldoByNormCif[norm] = row.saldo
+                }
+            }
             filteredList = filteredList.filter { cust ->
-                val dailyCust = dMap[cust.noRekening]
+                val dailyCust = resolveDailyForCust(cust)
                 val currentTunggakan = dailyCust?.totalTunggakan ?: cust.totalTunggakan
                 if (currentTunggakan <= 0.0) {
                     false
                 } else {
                     val custNormCif = normalizeCifLocal(cust.cif)
-                    if (custNormCif.isBlank()) {
-                        false
-                    } else {
-                        val custSavings = di319List.filter { 
-                            val rowNorm = normalizeCifLocal(it.cif)
-                            rowNorm.isNotEmpty() && rowNorm == custNormCif 
-                        }.sortedByDescending { it.saldo }
-                        
-                        val saving1Saldo = custSavings.getOrNull(0)?.saldo ?: 0.0
-                        val saving2Saldo = custSavings.getOrNull(1)?.saldo ?: 0.0
-                        
-                        (saving1Saldo > 25000.0 || saving2Saldo > 25000.0)
-                    }
+                    custNormCif.isNotBlank() && (maxSaldoByNormCif[custNormCif] ?: 0.0) > 25000.0
                 }
             }
         }
         if (tucil) {
             filteredList = filteredList.filter { cust ->
-                val dailyCust = dMap[cust.noRekening]
+                val dailyCust = resolveDailyForCust(cust)
                 val currentTunggakan = dailyCust?.totalTunggakan ?: cust.totalTunggakan
-                currentTunggakan >= 1.0 && currentTunggakan <= 100000.0
+                currentTunggakan > 0.0 && currentTunggakan < 100000.0
+            }
+        }
+        if (tunggakanKurang6Bln) {
+            val nowDate = java.time.LocalDate.now()
+            filteredList = filteredList.filter { cust ->
+                val dailyCust = resolveDailyForCust(cust)
+                val currentTunggakan = dailyCust?.totalTunggakan ?: cust.totalTunggakan
+                val currentUmurTgk = dailyCust?.umurTgk ?: cust.umurTgk
+                val currentKolek = (dailyCust?.kolek?.ifBlank { cust.kolek } ?: cust.kolek).trim().uppercase()
+                val isNonLancar = currentKolek.startsWith("SML") ||
+                    currentKolek.contains("DPK") ||
+                    currentKolek == "2" ||
+                    currentKolek == "KL" ||
+                    currentKolek.contains("KURANG") ||
+                    currentKolek == "D" ||
+                    currentKolek.contains("DIRAGUKAN") ||
+                    currentKolek == "M" ||
+                    currentKolek.contains("MACET") ||
+                    currentKolek == "3" ||
+                    currentKolek == "4" ||
+                    currentKolek == "5" ||
+                    currentKolek == "NPL"
+                val hasArrears = currentTunggakan > 0.0 || currentUmurTgk > 0 || isNonLancar
+                if (!hasArrears) {
+                    false
+                } else {
+                    val rawTglReal = cust.tglReal.ifBlank {
+                        cust.extraColumns.split("||")
+                            .firstOrNull { part ->
+                                part.startsWith("Tgl Real::", ignoreCase = true) ||
+                                    part.startsWith("Tgl Realisasi::", ignoreCase = true) ||
+                                    part.startsWith("TGL_REAL::", ignoreCase = true)
+                            }
+                            ?.substringAfter("::")
+                            ?.trim()
+                            ?: ""
+                    }
+                    val elapsed = DateTenorUtils.monthsElapsedSince(rawTglReal, nowDate)
+                    elapsed != null && elapsed < 6
+                }
             }
         }
 
@@ -3089,6 +3517,34 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         }
+        viewModelScope.launch {
+            var startedOfflineOrLostNetwork = !repository.isNetworkAvailable(getApplication())
+            isNetworkConnected.collect { connected ->
+                if (isOfflineModeEnabled.value) return@collect
+                if (!connected) {
+                    startedOfflineOrLostNetwork = true
+                    isShowingCachedOfflineData.value = true
+                } else {
+                    if (startedOfflineOrLostNetwork) {
+                        startedOfflineOrLostNetwork = false
+                        val totalCustomers = repository.getTotalCustomersCount()
+                        if (totalCustomers == 0) {
+                            refreshSpreadsheetData(force = false)
+                        } else {
+                            isShowingCachedOfflineData.value = false
+                            if (errorMessage.value?.contains("Koneksi", ignoreCase = true) == true) {
+                                errorMessage.value = null
+                            }
+                            if (dashboardMonthlySummary.value.isEmpty()) {
+                                loadAllMonthlyChartData()
+                            }
+                        }
+                    } else {
+                        isShowingCachedOfflineData.value = false
+                    }
+                }
+            }
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val totalCustomers = repository.getTotalCustomersCount()
             val networkOk = repository.isNetworkAvailable(getApplication())
@@ -3101,6 +3557,9 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 }
             } else if (!networkOk && !isOfflineModeEnabled.value) {
                 isShowingCachedOfflineData.value = true
+            } else if (networkOk && !isOfflineModeEnabled.value) {
+                // Background hydrate 12-month chart & summaries if any Room cache is missing
+                loadAllMonthlyChartData(forceRefresh = false)
             }
         }
         viewModelScope.launch {
@@ -3258,6 +3717,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             setorPokok = filterSetorPokok.value,
             tusim = filterTusim.value,
             tucil = filterTucil.value,
+            tunggakanKurang6Bln = filterTunggakanKurang6Bln.value,
             jatuhTempoOnly = filterJatuhTempoOnly.value,
             jatuhTempoH = selectedJatuhTempoH.value,
             desa = filterDesa.value
@@ -3286,6 +3746,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             filterSetorPokok.value = newFilters.setorPokok
             filterTusim.value = newFilters.tusim
             filterTucil.value = newFilters.tucil
+            filterTunggakanKurang6Bln.value = newFilters.tunggakanKurang6Bln
             filterJatuhTempoOnly.value = newFilters.jatuhTempoOnly
             selectedJatuhTempoH.value = newFilters.jatuhTempoH
             filterDesa.value = newFilters.desa
@@ -3299,6 +3760,28 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
 
         sharedPrefs.edit().putString("last_selected_menu", menu).apply()
         checkAndRefreshIfEmpty(menu)
+    }
+
+    fun resetActiveFiltersForQuickJump() {
+        searchQuery.value = ""
+        filterKolek.value = "SEMUA"
+        filterKolekUpdate.value = "SEMUA"
+        filterKolekBlnLalu.value = "SEMUA"
+        filterMantri.value = "SEMUA"
+        setFilterBulanLunas("SEMUA")
+        filterTahunLunas.value = "SEMUA"
+        filterOS.value = "SEMUA"
+        filterPlafondRange.value = "SEMUA"
+        filterTenorRange.value = "SEMUA"
+        filterSegmen.value = "SEMUA"
+        filterNpd.value = "SEMUA"
+        filterDesa.value = "SEMUA"
+        filterAlamat.value = ""
+        filterSetorPokok.value = false
+        filterTusim.value = false
+        filterTucil.value = false
+        filterTunggakanKurang6Bln.value = false
+        filterJatuhTempoOnly.value = false
     }
 
     fun checkAndRefreshIfEmpty(menu: String) {
@@ -3358,6 +3841,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             val isOffline = isOfflineModeEnabled.value
 
             if (!isOffline && !repository.isNetworkAvailable(getApplication())) {
+                loadLocalCachedData()
                 val cachedDi319 = repository.getCachedDi319RowsOnce()
                 if (cachedDi319.isNotEmpty() && di319Rows.value.isEmpty()) {
                     di319Rows.value = cachedDi319

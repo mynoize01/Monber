@@ -8,12 +8,15 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.result.ActivityResultLauncher
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -219,13 +222,18 @@ fun SettingsMenuPopupDialog(
                     AnimatedContent(
                         targetState = currentPage,
                         transitionSpec = {
+                            val pageSpring = spring<IntOffset>(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMediumLow,
+                                visibilityThreshold = IntOffset.VisibilityThreshold
+                            )
                             if (targetState != SettingsPopupPage.MENU) {
-                                (slideInHorizontally(tween(220)) { it / 3 } + fadeIn(tween(200))) togetherWith
-                                    (slideOutHorizontally(tween(180)) { -it / 4 } + fadeOut(tween(150)))
+                                slideInHorizontally(animationSpec = pageSpring) { it } togetherWith
+                                    slideOutHorizontally(animationSpec = pageSpring) { -it }
                             } else {
-                                (slideInHorizontally(tween(220)) { -it / 3 } + fadeIn(tween(200))) togetherWith
-                                    (slideOutHorizontally(tween(180)) { it / 4 } + fadeOut(tween(150)))
-                            }
+                                slideInHorizontally(animationSpec = pageSpring) { -it } togetherWith
+                                    slideOutHorizontally(animationSpec = pageSpring) { it }
+                            } using SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> snap() })
                         },
                         label = "settings_popup_page"
                     ) { page ->

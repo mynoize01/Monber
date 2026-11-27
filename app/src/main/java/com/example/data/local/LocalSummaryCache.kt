@@ -14,8 +14,7 @@ object LocalSummaryCache {
     private const val MONTHLY_KOLEK_PREFIX = "lw321_kolek_m"
     private const val MONTHLY_TUNGGAKAN_PREFIX = "lw321_tunggakan_m"
 
-    fun saveSummaries(
-        context: Context,
+    fun serializeSummaries(
         summaryBulanLalu: UnitSummaryData,
         summaryAkhirBulan: UnitSummaryData,
         summaryDaily: UnitSummaryData,
@@ -28,73 +27,46 @@ object LocalSummaryCache {
         dashboardMonthlySummary: Map<Int, UnitSummaryData>,
         dashboardMonthlyKolekSummary: Map<Int, KolekSummaryData>,
         dashboardMonthlyMantriSummary: Map<Int, Map<String, MantriDetailData>>
-    ) {
-        try {
-            val root = JSONObject()
+    ): String {
+        val root = JSONObject()
 
-            // Unit summaries
-            root.put("summaryBulanLalu", unitSummaryToJson(summaryBulanLalu))
-            root.put("summaryAkhirBulan", unitSummaryToJson(summaryAkhirBulan))
-            root.put("summaryDaily", unitSummaryToJson(summaryDaily))
+        root.put("summaryBulanLalu", unitSummaryToJson(summaryBulanLalu))
+        root.put("summaryAkhirBulan", unitSummaryToJson(summaryAkhirBulan))
+        root.put("summaryDaily", unitSummaryToJson(summaryDaily))
 
-            // Kolek summaries
-            root.put("kolekSummaryBulanLalu", kolekSummaryToJson(kolekSummaryBulanLalu))
-            root.put("kolekSummaryAkhirBulan", kolekSummaryToJson(kolekSummaryAkhirBulan))
-            root.put("kolekSummaryDaily", kolekSummaryToJson(kolekSummaryDaily))
+        root.put("kolekSummaryBulanLalu", kolekSummaryToJson(kolekSummaryBulanLalu))
+        root.put("kolekSummaryAkhirBulan", kolekSummaryToJson(kolekSummaryAkhirBulan))
+        root.put("kolekSummaryDaily", kolekSummaryToJson(kolekSummaryDaily))
 
-            // Mantri summaries
-            root.put("mantriSummaryBulanLalu", mantriMapToJson(mantriSummaryBulanLalu))
-            root.put("mantriSummaryAkhirBulan", mantriMapToJson(mantriSummaryAkhirBulan))
-            root.put("mantriSummaryDaily", mantriMapToJson(mantriSummaryDaily))
+        root.put("mantriSummaryBulanLalu", mantriMapToJson(mantriSummaryBulanLalu))
+        root.put("mantriSummaryAkhirBulan", mantriMapToJson(mantriSummaryAkhirBulan))
+        root.put("mantriSummaryDaily", mantriMapToJson(mantriSummaryDaily))
 
-            // Dashboard monthly summaries (1..12)
-            val dMonthlyObj = JSONObject()
-            dashboardMonthlySummary.forEach { (m, u) ->
-                dMonthlyObj.put(m.toString(), unitSummaryToJson(u))
-            }
-            root.put("dashboardMonthlySummary", dMonthlyObj)
-
-            val dKolekObj = JSONObject()
-            dashboardMonthlyKolekSummary.forEach { (m, k) ->
-                dKolekObj.put(m.toString(), kolekSummaryToJson(k))
-            }
-            root.put("dashboardMonthlyKolekSummary", dKolekObj)
-
-            val dMantriObj = JSONObject()
-            dashboardMonthlyMantriSummary.forEach { (m, map) ->
-                dMantriObj.put(m.toString(), mantriMapToJson(map))
-            }
-            root.put("dashboardMonthlyMantriSummary", dMantriObj)
-
-            val file = File(context.filesDir, SUMMARIES_FILE)
-            file.writeText(root.toString())
-        } catch (e: Exception) {
-            android.util.Log.e("LocalSummaryCache", "Error saving summaries cache", e)
+        val dMonthlyObj = JSONObject()
+        dashboardMonthlySummary.forEach { (m, u) ->
+            dMonthlyObj.put(m.toString(), unitSummaryToJson(u))
         }
+        root.put("dashboardMonthlySummary", dMonthlyObj)
+
+        val dKolekObj = JSONObject()
+        dashboardMonthlyKolekSummary.forEach { (m, k) ->
+            dKolekObj.put(m.toString(), kolekSummaryToJson(k))
+        }
+        root.put("dashboardMonthlyKolekSummary", dKolekObj)
+
+        val dMantriObj = JSONObject()
+        dashboardMonthlyMantriSummary.forEach { (m, map) ->
+            dMantriObj.put(m.toString(), mantriMapToJson(map))
+        }
+        root.put("dashboardMonthlyMantriSummary", dMantriObj)
+
+        return root.toString()
     }
 
-    data class CachedDashboardData(
-        val summaryBulanLalu: UnitSummaryData,
-        val summaryAkhirBulan: UnitSummaryData,
-        val summaryDaily: UnitSummaryData,
-        val kolekSummaryBulanLalu: KolekSummaryData,
-        val kolekSummaryAkhirBulan: KolekSummaryData,
-        val kolekSummaryDaily: KolekSummaryData,
-        val mantriSummaryBulanLalu: Map<String, MantriDetailData>,
-        val mantriSummaryAkhirBulan: Map<String, MantriDetailData>,
-        val mantriSummaryDaily: Map<String, MantriDetailData>,
-        val dashboardMonthlySummary: Map<Int, UnitSummaryData>,
-        val dashboardMonthlyKolekSummary: Map<Int, KolekSummaryData>,
-        val dashboardMonthlyMantriSummary: Map<Int, Map<String, MantriDetailData>>
-    )
-
-    fun loadSummaries(context: Context): CachedDashboardData? {
-        try {
-            val file = File(context.filesDir, SUMMARIES_FILE)
-            if (!file.exists()) return null
-            val text = file.readText()
-            if (text.isBlank()) return null
-            val root = JSONObject(text)
+    fun deserializeSummaries(jsonText: String): CachedDashboardData? {
+        return try {
+            if (jsonText.isBlank()) return null
+            val root = JSONObject(jsonText)
 
             val sumBlnLalu = jsonToUnitSummary(root.optJSONObject("summaryBulanLalu"))
             val sumAkhirBln = jsonToUnitSummary(root.optJSONObject("summaryAkhirBulan"))
@@ -138,7 +110,7 @@ object LocalSummaryCache {
                 }
             }
 
-            return CachedDashboardData(
+            CachedDashboardData(
                 summaryBulanLalu = sumBlnLalu,
                 summaryAkhirBulan = sumAkhirBln,
                 summaryDaily = sumDaily,
@@ -152,6 +124,70 @@ object LocalSummaryCache {
                 dashboardMonthlyKolekSummary = dKolek,
                 dashboardMonthlyMantriSummary = dMantri
             )
+        } catch (e: Exception) {
+            android.util.Log.e("LocalSummaryCache", "Error deserializing summaries cache", e)
+            null
+        }
+    }
+
+    fun saveSummaries(
+        context: Context,
+        summaryBulanLalu: UnitSummaryData,
+        summaryAkhirBulan: UnitSummaryData,
+        summaryDaily: UnitSummaryData,
+        kolekSummaryBulanLalu: KolekSummaryData,
+        kolekSummaryAkhirBulan: KolekSummaryData,
+        kolekSummaryDaily: KolekSummaryData,
+        mantriSummaryBulanLalu: Map<String, MantriDetailData>,
+        mantriSummaryAkhirBulan: Map<String, MantriDetailData>,
+        mantriSummaryDaily: Map<String, MantriDetailData>,
+        dashboardMonthlySummary: Map<Int, UnitSummaryData>,
+        dashboardMonthlyKolekSummary: Map<Int, KolekSummaryData>,
+        dashboardMonthlyMantriSummary: Map<Int, Map<String, MantriDetailData>>
+    ) {
+        try {
+            val payload = serializeSummaries(
+                summaryBulanLalu = summaryBulanLalu,
+                summaryAkhirBulan = summaryAkhirBulan,
+                summaryDaily = summaryDaily,
+                kolekSummaryBulanLalu = kolekSummaryBulanLalu,
+                kolekSummaryAkhirBulan = kolekSummaryAkhirBulan,
+                kolekSummaryDaily = kolekSummaryDaily,
+                mantriSummaryBulanLalu = mantriSummaryBulanLalu,
+                mantriSummaryAkhirBulan = mantriSummaryAkhirBulan,
+                mantriSummaryDaily = mantriSummaryDaily,
+                dashboardMonthlySummary = dashboardMonthlySummary,
+                dashboardMonthlyKolekSummary = dashboardMonthlyKolekSummary,
+                dashboardMonthlyMantriSummary = dashboardMonthlyMantriSummary
+            )
+            val file = File(context.filesDir, SUMMARIES_FILE)
+            file.writeText(payload)
+        } catch (e: Exception) {
+            android.util.Log.e("LocalSummaryCache", "Error saving summaries cache", e)
+        }
+    }
+
+    data class CachedDashboardData(
+        val summaryBulanLalu: UnitSummaryData,
+        val summaryAkhirBulan: UnitSummaryData,
+        val summaryDaily: UnitSummaryData,
+        val kolekSummaryBulanLalu: KolekSummaryData,
+        val kolekSummaryAkhirBulan: KolekSummaryData,
+        val kolekSummaryDaily: KolekSummaryData,
+        val mantriSummaryBulanLalu: Map<String, MantriDetailData>,
+        val mantriSummaryAkhirBulan: Map<String, MantriDetailData>,
+        val mantriSummaryDaily: Map<String, MantriDetailData>,
+        val dashboardMonthlySummary: Map<Int, UnitSummaryData>,
+        val dashboardMonthlyKolekSummary: Map<Int, KolekSummaryData>,
+        val dashboardMonthlyMantriSummary: Map<Int, Map<String, MantriDetailData>>
+    )
+
+    fun loadSummaries(context: Context): CachedDashboardData? {
+        try {
+            val file = File(context.filesDir, SUMMARIES_FILE)
+            if (!file.exists()) return null
+            val text = file.readText()
+            return deserializeSummaries(text)
         } catch (e: Exception) {
             android.util.Log.e("LocalSummaryCache", "Error loading summaries cache", e)
             return null

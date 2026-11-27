@@ -2,17 +2,25 @@ package com.example.data.repository
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
+import com.example.data.local.CachedSummaryDao
 import com.example.data.local.CustomerDao
 import com.example.data.local.Di319Dao
+import com.example.data.local.MonthlyHistoryDao
 import com.example.data.local.SyncMetadataDao
+import com.example.data.model.CachedSummaryEntity
 import com.example.data.model.CustomerEntity
 import com.example.data.model.Di319Row
+import com.example.data.model.MonthlyHistoryEntity
 import com.example.data.model.SyncMetadataEntity
 import com.example.data.model.toEntity
 import com.example.data.network.SpreadsheetService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -21,7 +29,9 @@ import kotlinx.coroutines.withContext
 class CustomerRepository(
     private val customerDao: CustomerDao,
     private val di319Dao: Di319Dao? = null,
-    private val syncMetadataDao: SyncMetadataDao? = null
+    private val syncMetadataDao: SyncMetadataDao? = null,
+    private val cachedSummaryDao: CachedSummaryDao? = null,
+    private val monthlyHistoryDao: MonthlyHistoryDao? = null
 ) {
 
     fun isNetworkAvailable(context: Context): Boolean {
@@ -31,6 +41,45 @@ class CustomerRepository(
         val capabilities = cm.getNetworkCapabilities(network) ?: return false
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
+
+    fun observeNetworkConnectivity(context: Context): Flow<Boolean> = callbackFlow {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        if (cm == null) {
+            trySend(false)
+            close()
+            return@callbackFlow
+        }
+
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                trySend(true)
+            }
+
+            override fun onLost(network: Network) {
+                trySend(isNetworkAvailable(context))
+            }
+
+            override fun onCapabilitiesChanged(
+                network: Network,
+                networkCapabilities: NetworkCapabilities
+            ) {
+                val hasInternet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                trySend(hasInternet)
+            }
+        }
+
+        trySend(isNetworkAvailable(context))
+        val registered = runCatching {
+            cm.registerDefaultNetworkCallback(callback)
+            true
+        }.getOrDefault(false)
+
+        awaitClose {
+            if (registered) {
+                runCatching { cm.unregisterNetworkCallback(callback) }
+            }
+        }
+    }.distinctUntilChanged()
 
     /**
      * Reactive Room Flow of customer entities for a given menu.
@@ -55,6 +104,117 @@ class CustomerRepository(
 
     suspend fun getLastSyncMetadata(): SyncMetadataEntity? = withContext(Dispatchers.IO) {
         syncMetadataDao?.getMetadata("GLOBAL_SYNC")
+    }
+
+    suspend fun getSyncMetadataForKey(cacheKey: String): SyncMetadataEntity? = withContext(Dispatchers.IO) {
+        syncMetadataDao?.getMetadata(cacheKey)
+    }
+
+    suspend fun saveSummaryJson(cacheKey: String, payloadJson: String) = withContext(Dispatchers.IO) {
+        val dao = cachedSummaryDao ?: return@withContext
+        if (payloadJson.isBlank()) return@withContext
+        dao.upsert(
+            CachedSummaryEntity(
+                cacheKey = cacheKey,
+                payloadJson = payloadJson,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun getSummaryJsonOnce(cacheKey: String): String? = withContext(Dispatchers.IO) {
+        cachedSummaryDao?.getSummaryOnce(cacheKey)?.payloadJson
+    }
+
+    fun observeSummaryJson(cacheKey: String): Flow<String?> {
+        return cachedSummaryDao?.observeSummary(cacheKey)?.map { it?.payloadJson } ?: emptyFlow()
+    }
+
+    suspend fun saveMonthlyHistory(
+        month: Int,
+        kolekMap: Map<String, String>,
+        tunggakanMap: Map<String, Double>
+    ) = withContext(Dispatchers.IO) {
+        val dao = monthlyHistoryDao ?: return@withContext
+        if (month !in 1..12 || (kolekMap.isEmpty() && tunggakanMap.isEmpty())) return@withContext
+
+        val allKeys = LinkedHashSet<String>(kolekMap.size + tunggakanMap.size)
+        allKeys.addAll(kolekMap.keys)
+        allKeys.addAll(tunggakanMap.keys)
+
+        val entities = allKeys.mapNotNull { key ->
+            if (key.isBlank()) return@mapNotNull null
+            MonthlyHistoryEntity(
+                month = month,
+                accountKey = key,
+                kolek = kolekMap[key].orEmpty(),
+                tunggakan = tunggakanMap[key]
+            )
+        }
+        if (entities.isEmpty()) return@withContext
+
+        dao.replaceMonth(month, entities)
+        syncMetadataDao?.upsert(
+            SyncMetadataEntity(
+                cacheKey = "MONTHLY_HISTORY_$month",
+                lastSyncedAt = System.currentTimeMillis(),
+                rowCount = entities.size,
+                label = "LW321_M_$month"
+            )
+        )
+    }
+
+    suspend fun getMonthlyHistoryMapsOnce(month: Int): Pair<Map<String, String>, Map<String, Double>> =
+        withContext(Dispatchers.IO) {
+            val dao = monthlyHistoryDao ?: return@withContext (emptyMap<String, String>() to emptyMap<String, Double>())
+            if (month !in 1..12) return@withContext (emptyMap<String, String>() to emptyMap<String, Double>())
+            val rows = dao.getHistoryByMonthOnce(month)
+            if (rows.isEmpty()) return@withContext (emptyMap<String, String>() to emptyMap<String, Double>())
+            val kolekMap = HashMap<String, String>(rows.size)
+            val tgkMap = HashMap<String, Double>(rows.size)
+            rows.forEach { row ->
+                if (row.kolek.isNotBlank()) {
+                    kolekMap[row.accountKey] = row.kolek
+                }
+                if (row.tunggakan != null) {
+                    tgkMap[row.accountKey] = row.tunggakan
+                }
+            }
+            kolekMap to tgkMap
+        }
+
+    suspend fun getCustomerMonthlyHistoryOnce(
+        keys: List<String>
+    ): Pair<Map<Int, String>, Map<Int, Double?>> = withContext(Dispatchers.IO) {
+        val dao = monthlyHistoryDao ?: return@withContext (emptyMap<Int, String>() to emptyMap<Int, Double?>())
+        val cleanedKeys = keys.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        if (cleanedKeys.isEmpty()) return@withContext (emptyMap<Int, String>() to emptyMap<Int, Double?>())
+
+        val rows = dao.getHistoryForAccountKeysOnce(cleanedKeys)
+        if (rows.isEmpty()) return@withContext (emptyMap<Int, String>() to emptyMap<Int, Double?>())
+
+        val byMonth = rows.groupBy { it.month }
+        val kolekResult = HashMap<Int, String>()
+        val tgkResult = HashMap<Int, Double?>()
+
+        byMonth.forEach { (month, monthRows) ->
+            for (k in cleanedKeys) {
+                val match = monthRows.firstOrNull { it.accountKey == k }
+                if (match != null) {
+                    if (match.kolek.isNotBlank() && !kolekResult.containsKey(month)) {
+                        kolekResult[month] = match.kolek
+                    }
+                    if (match.tunggakan != null && !tgkResult.containsKey(month)) {
+                        tgkResult[month] = match.tunggakan
+                    }
+                }
+            }
+        }
+        kolekResult to tgkResult
+    }
+
+    suspend fun getCachedHistoryMonthsOnce(): Set<Int> = withContext(Dispatchers.IO) {
+        monthlyHistoryDao?.getCachedMonthsOnce()?.toSet() ?: emptySet()
     }
 
     suspend fun getCustomersCount(menuType: String): Int = withContext(Dispatchers.IO) {

@@ -2,8 +2,11 @@ package com.example.ui.screens
 
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -14,31 +17,41 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.compose.material.icons.automirrored.filled.TrendingDown
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.EventNote
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Warning
@@ -46,16 +59,23 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -64,11 +84,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -80,36 +103,56 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.data.model.CustomerEntity
+import com.example.data.util.DateTenorUtils
 import com.example.ui.viewmodel.CustomerViewModel
 import com.example.ui.viewmodel.KolekSummaryData
 import com.example.ui.viewmodel.MantriDetailData
+import com.example.ui.viewmodel.RealisasiCustomerItem
+import com.example.ui.viewmodel.RealisasiNetMetrics
 import com.example.ui.viewmodel.UnitSummaryData
 import com.example.update.AppUpdateState
-import java.text.DecimalFormat
-import java.text.DecimalFormatSymbols
 import java.text.NumberFormat
+import java.time.LocalDate
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
 
-private data class MonthlyPortfolioPoint(
+private data class MonthlyRealisasiPoint(
     val monthNumber: Int,
+    val yearNumber: Int,
     val shortLabel: String,
     val fullLabel: String,
-    val os: Double,
-    val sml: Double,
-    val npl: Double,
+    val realisasi: Double,
+    val netDisburs: Double,
+    val debtors: Int,
+    val hasData: Boolean,
+    val customers: List<RealisasiCustomerItem> = emptyList()
+)
+
+private data class MonthlyKolekTrendPoint(
+    val monthNumber: Int,
+    val yearNumber: Int,
+    val shortLabel: String,
+    val fullLabel: String,
+    val totalOs: Double,
+    val smlOs: Double,
+    val smlDeb: Int,
+    val smlPct: Double,
+    val nplOs: Double,
+    val nplDeb: Int,
+    val nplPct: Double,
     val hasData: Boolean
 )
 
-private enum class PortfolioChartFilter(val label: String) {
-    ALL("Semua"),
-    OS("OS"),
-    SML("SML"),
-    NPL("NPL")
+private enum class KolekTrendFocus {
+    ALL,
+    SML,
+    NPL
 }
 
 private enum class BerandaScope(val label: String) {
@@ -149,12 +192,17 @@ fun BerandaScreenView(
     val dashboardMonthlySummary by viewModel.dashboardMonthlySummary.collectAsState()
     val dashboardMonthlyKolekSummary by viewModel.dashboardMonthlyKolekSummary.collectAsState()
     val dashboardMonthlyMantriSummary by viewModel.dashboardMonthlyMantriSummary.collectAsState()
+    val dashboardMonthlyRealisasi by viewModel.dashboardMonthlyRealisasi.collectAsState()
 
     val periodDateDaily by viewModel.periodDateDaily.collectAsState()
     val periodDateAkhirBulan by viewModel.periodDateAkhirBulan.collectAsState()
     val periodDateBulanLalu by viewModel.periodDateBulanLalu.collectAsState()
 
     val monitoringCustomers by viewModel.monitoringCustomers.collectAsState()
+    val dailyCustomers by viewModel.dailyCustomers.collectAsState()
+    val akhirBulanCustomers by viewModel.akhirBulanCustomers.collectAsState()
+    val dailyDataMap by viewModel.dailyDataMap.collectAsState()
+    val di319Rows by viewModel.di319Rows.collectAsState()
     val kunjunganKeys by viewModel.kunjunganKeys.collectAsState()
     val activeVisitDateStr by viewModel.activeVisitDateStr.collectAsState()
     val dueTodayCount by viewModel.dueTodayCount.collectAsState()
@@ -170,6 +218,10 @@ fun BerandaScreenView(
         if (summaryAkhirBulan.debtors == 0) {
             viewModel.loadSummaryForPeriod("AKHIR_BULAN")
         }
+    }
+
+    LaunchedEffect(dailyCustomers.size, akhirBulanCustomers.size, monitoringCustomers.size) {
+        viewModel.refreshMonthlyRealisasiChart()
     }
 
     val cleanPnDigits = remember(loggedInPN) {
@@ -193,8 +245,12 @@ fun BerandaScreenView(
     var berandaScope by remember(loggedInPN) {
         mutableStateOf(if (loggedInPN.isNotBlank()) BerandaScope.KELOLAAN else BerandaScope.UNIT)
     }
-    var chartFilter by remember { mutableStateOf(PortfolioChartFilter.ALL) }
+    var realisasiPeriodMonths by remember { mutableIntStateOf(6) }
     var selectedChartMonthIndex by remember { mutableIntStateOf(-1) }
+    var showRealisasiDetailSheet by remember { mutableStateOf(false) }
+    var trendPeriodMonths by remember { mutableIntStateOf(6) }
+    var selectedTrendMonthIndex by remember { mutableIntStateOf(-1) }
+    var trendFocus by remember { mutableStateOf(KolekTrendFocus.ALL) }
     var showNotificationsDialog by remember { mutableStateOf(false) }
 
     // Helper to look up Mantri stats cleanly inside MantriDetailData map
@@ -330,9 +386,84 @@ fun BerandaScreenView(
         )
     }
 
-    // Build 12-month rolling timeline for OS, SML, and NPL
-    val monthlyPoints = remember(
+    // Build 3/6/9/12-month rolling timeline for Realisasi & Netdisburse
+    val realisasiPoints = remember(
         effectiveScope,
+        realisasiPeriodMonths,
+        dashboardMonthlyRealisasi,
+        summaryDaily,
+        summaryAkhirBulan,
+        summaryBulanLalu,
+        periodDateDaily,
+        periodDateAkhirBulan,
+        periodDateBulanLalu,
+        displayName,
+        cleanPnDigits,
+        loggedInPN
+    ) {
+        val shortMonthNames = listOf("Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des")
+        val fullMonthNames = listOf(
+            "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+            "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+        )
+
+        val cal = Calendar.getInstance()
+        val fallbackY = cal.get(Calendar.YEAR)
+        val fallbackM = cal.get(Calendar.MONTH) + 1
+
+        fun parseYm(raw: String): Pair<Int, Int>? {
+            val parsed = DateTenorUtils.parseYearMonthDay(raw) ?: return null
+            return parsed.first to parsed.second
+        }
+
+        val dailyYm = if (summaryDaily.debtors > 0) parseYm(periodDateDaily) else null
+        val akhirYm = if (summaryAkhirBulan.debtors > 0) parseYm(periodDateAkhirBulan) else null
+        val blnLaluYm = if (summaryBulanLalu.debtors > 0) parseYm(periodDateBulanLalu) else null
+
+        val (endYear, endMonth) = dailyYm ?: akhirYm ?: blnLaluYm ?: (fallbackY to fallbackM)
+        val targetCleanName = cleanMantriNameOnly(displayName)
+
+        fun findMantriRealisasi(map: Map<String, RealisasiNetMetrics>): RealisasiNetMetrics? {
+            if (loggedInPN.isBlank() || map.isEmpty()) return null
+            return map.entries.firstOrNull { entry ->
+                val keyClean = cleanMantriNameOnly(entry.key)
+                keyClean.equals(targetCleanName, ignoreCase = true) ||
+                    entry.key.contains(displayName, ignoreCase = true) ||
+                    (cleanPnDigits.isNotBlank() && entry.key.contains(cleanPnDigits))
+            }?.value
+        }
+
+        val monthCount = realisasiPeriodMonths.coerceIn(3, 12)
+        (-(monthCount - 1)..0).map { offset ->
+            val totalMonths = endYear * 12 + (endMonth - 1) + offset
+            val yr = totalMonths.floorDiv(12)
+            val mo = (totalMonths % 12 + 12) % 12 + 1
+            val snapshot = dashboardMonthlyRealisasi[yr * 100 + mo]
+
+            val metrics = if (effectiveScope == BerandaScope.KELOLAAN) {
+                snapshot?.byMantri?.let { findMantriRealisasi(it) } ?: RealisasiNetMetrics()
+            } else {
+                snapshot?.unit ?: RealisasiNetMetrics()
+            }
+
+            MonthlyRealisasiPoint(
+                monthNumber = mo,
+                yearNumber = yr,
+                shortLabel = shortMonthNames[mo - 1],
+                fullLabel = "${fullMonthNames[mo - 1]} $yr",
+                realisasi = metrics.realisasi,
+                netDisburs = metrics.netDisburs,
+                debtors = metrics.debtors,
+                hasData = metrics.debtors > 0 || metrics.realisasi > 0.0,
+                customers = metrics.customers
+            )
+        }
+    }
+
+    // Build 3/6/9/12-month historical SML & NPL trend timeline
+    val kolekTrendPoints = remember(
+        effectiveScope,
+        trendPeriodMonths,
         dashboardMonthlySummary,
         dashboardMonthlyKolekSummary,
         dashboardMonthlyMantriSummary,
@@ -350,8 +481,7 @@ fun BerandaScreenView(
         periodDateBulanLalu,
         displayName,
         cleanPnDigits,
-        activeScopeSummary,
-        activeScopeKolek
+        loggedInPN
     ) {
         val shortMonthNames = listOf("Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des")
         val fullMonthNames = listOf(
@@ -359,101 +489,75 @@ fun BerandaScreenView(
             "Juli", "Agustus", "September", "Oktober", "November", "Desember"
         )
 
-        val dailyMonth = extractMonthAndYear(periodDateDaily).first.toIntOrNull()
-        val akhirMonth = extractMonthAndYear(periodDateAkhirBulan).first.toIntOrNull()
-        val blnLaluMonth = extractMonthAndYear(periodDateBulanLalu).first.toIntOrNull()
+        val cal = Calendar.getInstance()
+        val fallbackY = cal.get(Calendar.YEAR)
+        val fallbackM = cal.get(Calendar.MONTH) + 1
 
-        val endMonth = when {
-            dailyMonth != null && summaryDaily.debtors > 0 -> dailyMonth
-            akhirMonth != null && summaryAkhirBulan.debtors > 0 -> akhirMonth
-            blnLaluMonth != null && summaryBulanLalu.debtors > 0 -> blnLaluMonth
-            dashboardMonthlySummary.isNotEmpty() -> dashboardMonthlySummary.keys.maxOrNull() ?: (Calendar.getInstance().get(Calendar.MONTH) + 1)
-            else -> Calendar.getInstance().get(Calendar.MONTH) + 1
-        }.coerceIn(1, 12)
-
-        val rollingMonths = (0..11).map { offset ->
-            ((endMonth - 11 + offset + 11) % 12) + 1
+        fun parseYm(raw: String): Pair<Int, Int>? {
+            val parsed = DateTenorUtils.parseYearMonthDay(raw) ?: return null
+            return parsed.first to parsed.second
         }
 
-        rollingMonths.map { m ->
-            var osVal = 0.0
-            var smlVal = 0.0
-            var nplVal = 0.0
-            var found = false
+        val dailyYm = if (summaryDaily.debtors > 0) parseYm(periodDateDaily) else null
+        val akhirYm = if (summaryAkhirBulan.debtors > 0) parseYm(periodDateAkhirBulan) else null
+        val blnLaluYm = if (summaryBulanLalu.debtors > 0) parseYm(periodDateBulanLalu) else null
 
-            if (effectiveScope == BerandaScope.KELOLAAN) {
-                val liveDailyMantri = if (m == dailyMonth) findMantriDetail(mantriSummaryDaily) else null
-                val mMap = dashboardMonthlyMantriSummary[m]
-                val monthlyMantri = if (mMap != null) findMantriDetail(mMap) else null
-                val akhirMantri = if (m == akhirMonth) findMantriDetail(mantriSummaryAkhirBulan) else null
-                val blnLaluMantri = if (m == blnLaluMonth) findMantriDetail(mantriSummaryBulanLalu) else null
+        val (endYear, endMonth) = dailyYm ?: akhirYm ?: blnLaluYm ?: (fallbackY to fallbackM)
+        val monthCount = trendPeriodMonths.coerceIn(3, 12)
 
-                val picked = when {
-                    liveDailyMantri != null && liveDailyMantri.total.debtors > 0 -> liveDailyMantri
-                    monthlyMantri != null && monthlyMantri.total.debtors > 0 -> monthlyMantri
-                    akhirMantri != null && akhirMantri.total.debtors > 0 -> akhirMantri
-                    blnLaluMantri != null && blnLaluMantri.total.debtors > 0 -> blnLaluMantri
-                    m == endMonth && activeScopeSummary.debtors > 0 -> MantriDetailData(
-                        name = displayName,
-                        total = activeScopeSummary,
-                        lancar = activeScopeKolek.lancar,
-                        sml = activeScopeKolek.sml,
-                        npl = activeScopeKolek.npl
-                    )
-                    else -> null
+        (-(monthCount - 1)..0).map { offset ->
+            val totalMonths = endYear * 12 + (endMonth - 1) + offset
+            val yr = totalMonths.floorDiv(12)
+            val mo = (totalMonths % 12 + 12) % 12 + 1
+            val ym = yr to mo
+
+            val (totalOs, smlData, nplData) = if (effectiveScope == BerandaScope.KELOLAAN) {
+                val mantriDetail = when {
+                    dailyYm == ym -> findMantriDetail(mantriSummaryDaily)
+                        ?: dashboardMonthlyMantriSummary[mo]?.let { findMantriDetail(it) }
+                    akhirYm == ym -> findMantriDetail(mantriSummaryAkhirBulan)
+                        ?: dashboardMonthlyMantriSummary[mo]?.let { findMantriDetail(it) }
+                    blnLaluYm == ym -> findMantriDetail(mantriSummaryBulanLalu)
+                        ?: dashboardMonthlyMantriSummary[mo]?.let { findMantriDetail(it) }
+                    else -> dashboardMonthlyMantriSummary[mo]?.let { findMantriDetail(it) }
                 }
-                if (picked != null && (picked.total.os > 0.0 || picked.total.debtors > 0)) {
-                    osVal = picked.total.os
-                    smlVal = picked.sml.os
-                    nplVal = picked.npl.os
-                    found = true
+                if (mantriDetail != null) {
+                    val tOs = mantriDetail.total.os.takeIf { it > 0.0 }
+                        ?: (mantriDetail.lancar.os + mantriDetail.sml.os + mantriDetail.npl.os)
+                    Triple(tOs, mantriDetail.sml, mantriDetail.npl)
+                } else {
+                    Triple(0.0, UnitSummaryData(), UnitSummaryData())
                 }
             } else {
-                val monthlySum = dashboardMonthlySummary[m]
-                val monthlyKolek = dashboardMonthlyKolekSummary[m]
-
-                when {
-                    m == dailyMonth && summaryDaily.debtors > 0 -> {
-                        osVal = summaryDaily.os
-                        smlVal = kolekSummaryDaily.sml.os
-                        nplVal = kolekSummaryDaily.npl.os
-                        found = true
-                    }
-                    monthlySum != null && monthlySum.debtors > 0 -> {
-                        osVal = monthlySum.os
-                        smlVal = monthlyKolek?.sml?.os ?: 0.0
-                        nplVal = monthlyKolek?.npl?.os ?: 0.0
-                        found = true
-                    }
-                    m == akhirMonth && summaryAkhirBulan.debtors > 0 -> {
-                        osVal = summaryAkhirBulan.os
-                        smlVal = kolekSummaryAkhirBulan.sml.os
-                        nplVal = kolekSummaryAkhirBulan.npl.os
-                        found = true
-                    }
-                    m == blnLaluMonth && summaryBulanLalu.debtors > 0 -> {
-                        osVal = summaryBulanLalu.os
-                        smlVal = kolekSummaryBulanLalu.sml.os
-                        nplVal = kolekSummaryBulanLalu.npl.os
-                        found = true
-                    }
-                    m == endMonth && activeScopeSummary.debtors > 0 -> {
-                        osVal = activeScopeSummary.os
-                        smlVal = activeScopeKolek.sml.os
-                        nplVal = activeScopeKolek.npl.os
-                        found = true
-                    }
+                val (uSum, kSum) = when {
+                    dailyYm == ym && summaryDaily.debtors > 0 -> summaryDaily to kolekSummaryDaily
+                    akhirYm == ym && summaryAkhirBulan.debtors > 0 -> summaryAkhirBulan to kolekSummaryAkhirBulan
+                    blnLaluYm == ym && summaryBulanLalu.debtors > 0 -> summaryBulanLalu to kolekSummaryBulanLalu
+                    else -> (dashboardMonthlySummary[mo] ?: UnitSummaryData()) to
+                        (dashboardMonthlyKolekSummary[mo] ?: KolekSummaryData())
                 }
+                val tOs = uSum.os.takeIf { it > 0.0 }
+                    ?: (kSum.lancar.os + kSum.sml.os + kSum.npl.os)
+                Triple(tOs, kSum.sml, kSum.npl)
             }
 
-            MonthlyPortfolioPoint(
-                monthNumber = m,
-                shortLabel = shortMonthNames[m - 1],
-                fullLabel = fullMonthNames[m - 1],
-                os = osVal,
-                sml = smlVal,
-                npl = nplVal,
-                hasData = found
+            val smlPct = if (totalOs > 0.0) (smlData.os / totalOs) * 100.0 else 0.0
+            val nplPct = if (totalOs > 0.0) (nplData.os / totalOs) * 100.0 else 0.0
+            val hasData = totalOs > 0.0 || smlData.debtors > 0 || nplData.debtors > 0
+
+            MonthlyKolekTrendPoint(
+                monthNumber = mo,
+                yearNumber = yr,
+                shortLabel = shortMonthNames[mo - 1],
+                fullLabel = "${fullMonthNames[mo - 1]} $yr",
+                totalOs = totalOs,
+                smlOs = smlData.os,
+                smlDeb = smlData.debtors,
+                smlPct = smlPct,
+                nplOs = nplData.os,
+                nplDeb = nplData.debtors,
+                nplPct = nplPct,
+                hasData = hasData
             )
         }
     }
@@ -486,14 +590,134 @@ fun BerandaScreenView(
         list
     }
 
-    val totalDebtors = activeScopeSummary.debtors
-    val lancarDebtors = activeScopeKolek.lancar.debtors.coerceAtMost(totalDebtors)
-    val tunggakanDebtors = (totalDebtors - lancarDebtors).coerceAtLeast(0)
-    val lancarPct = if (totalDebtors > 0) (lancarDebtors.toDouble() / totalDebtors) * 100.0 else 0.0
-    val tunggakanPct = if (totalDebtors > 0) (tunggakanDebtors.toDouble() / totalDebtors) * 100.0 else 0.0
+    val totalOs = activeScopeSummary.os.takeIf { it > 0.0 }
+        ?: (activeScopeKolek.lancar.os + activeScopeKolek.sml.os + activeScopeKolek.npl.os)
 
     val lancarOs = activeScopeKolek.lancar.os
-    val tunggakanOs = activeScopeKolek.sml.os + activeScopeKolek.npl.os
+    val lancarDeb = activeScopeKolek.lancar.debtors
+    val lancarOsPct = if (totalOs > 0.0) (lancarOs / totalOs) * 100.0 else 0.0
+
+    val smlOs = activeScopeKolek.sml.os
+    val smlDeb = activeScopeKolek.sml.debtors
+    val smlOsPct = if (totalOs > 0.0) (smlOs / totalOs) * 100.0 else 0.0
+
+    val nplOs = activeScopeKolek.npl.os
+    val nplDeb = activeScopeKolek.npl.debtors
+    val nplOsPct = if (totalOs > 0.0) (nplOs / totalOs) * 100.0 else 0.0
+
+    val kelolaanSegmenSource = remember(
+        dailyCustomers,
+        akhirBulanCustomers,
+        kelolaanCustomers,
+        monitoringCustomers,
+        loggedInPN,
+        cleanPnDigits,
+        displayName,
+        effectiveScope
+    ) {
+        fun matchMantri(list: List<CustomerEntity>): List<CustomerEntity> {
+            if (loggedInPN.isBlank()) return emptyList()
+            return list.filter { cust ->
+                val custPnDigits = cust.pnMantri.filter { it.isDigit() }.trimStart('0')
+                (cleanPnDigits.isNotBlank() && custPnDigits == cleanPnDigits) ||
+                    cust.pnMantri.trim().equals(loggedInPN.trim(), ignoreCase = true) ||
+                    cust.namaMantri.contains(loggedInPN.trim(), ignoreCase = true) ||
+                    cust.namaMantri.contains(displayName, ignoreCase = true)
+            }
+        }
+        if (effectiveScope == BerandaScope.KELOLAAN && loggedInPN.isNotBlank()) {
+            matchMantri(dailyCustomers)
+                .ifEmpty { matchMantri(akhirBulanCustomers) }
+                .ifEmpty { kelolaanCustomers }
+        } else {
+            dailyCustomers
+                .ifEmpty { akhirBulanCustomers }
+                .ifEmpty { monitoringCustomers }
+        }
+    }
+
+    val segmenKelolaanGroups = remember(kelolaanSegmenSource) {
+        kelolaanSegmenSource
+            .groupBy { it.segmen.trim().uppercase().ifBlank { "LAINNYA" } }
+            .map { (name, group) ->
+                Triple(name, group.sumOf { it.osPinjaman }, group.size)
+            }
+            .sortedByDescending { it.second }
+    }
+
+    val savingsMaxByNormCif = remember(di319Rows) {
+        val map = mutableMapOf<String, Double>()
+        for (row in di319Rows) {
+            val norm = normalizeBerandaCif(row.cif)
+            if (norm.isNotEmpty()) {
+                val prev = map[norm] ?: 0.0
+                if (row.saldo > prev) map[norm] = row.saldo
+            }
+        }
+        map
+    }
+
+    val (tusimSummary, tucilSummary, tunggakanUnder6Summary) = remember(
+        kelolaanSegmenSource,
+        dailyDataMap,
+        savingsMaxByNormCif
+    ) {
+        val nowDate = LocalDate.now()
+        var tusimOs = 0.0
+        var tusimCount = 0
+        var tucilOs = 0.0
+        var tucilCount = 0
+        var tg6Os = 0.0
+        var tg6Count = 0
+
+        for (cust in kelolaanSegmenSource) {
+            val dailyCust = resolveBerandaDailyCustomer(cust, dailyDataMap)
+            val currentTunggakan = dailyCust?.totalTunggakan ?: cust.totalTunggakan
+            val currentUmurTgk = dailyCust?.umurTgk ?: cust.umurTgk
+            val currentKolek = dailyCust?.kolek?.ifBlank { cust.kolek } ?: cust.kolek
+            val currentOs = dailyCust?.osPinjaman ?: cust.osPinjaman
+
+            if (currentTunggakan > 0.0) {
+                val normCif = normalizeBerandaCif(cust.cif)
+                if (normCif.isNotBlank() && (savingsMaxByNormCif[normCif] ?: 0.0) > 25_000.0) {
+                    tusimOs += currentOs
+                    tusimCount++
+                }
+                if (currentTunggakan < 100_000.0) {
+                    tucilOs += currentOs
+                    tucilCount++
+                }
+            }
+
+            val hasArrears = currentTunggakan > 0.0 ||
+                currentUmurTgk > 0 ||
+                isNonLancarBerandaKolek(currentKolek)
+            if (hasArrears) {
+                val rawTglReal = cust.tglReal.ifBlank {
+                    cust.extraColumns.split("||")
+                        .firstOrNull { part ->
+                            part.startsWith("Tgl Real::", ignoreCase = true) ||
+                                part.startsWith("Tgl Realisasi::", ignoreCase = true) ||
+                                part.startsWith("TGL_REAL::", ignoreCase = true)
+                        }
+                        ?.substringAfter("::")
+                        ?.trim()
+                        ?: ""
+                }
+                val elapsed = DateTenorUtils.monthsElapsedSince(rawTglReal, nowDate)
+                if (elapsed != null && elapsed < 6) {
+                    tg6Os += currentOs
+                    tg6Count++
+                }
+            }
+        }
+
+        Triple(
+            UnitSummaryData(os = tusimOs, debtors = tusimCount),
+            UnitSummaryData(os = tucilOs, debtors = tucilCount),
+            UnitSummaryData(os = tg6Os, debtors = tg6Count)
+        )
+    }
 
     Box(
         modifier = modifier.fillMaxSize()
@@ -508,15 +732,13 @@ fun BerandaScreenView(
         )
 
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
+            modifier = Modifier.fillMaxSize()
         ) {
-            // 1. Transparent Hero Overlay aligned with the dark-blue upper region of bg_beranda
+            // 1. Frozen Transparent Hero Overlay aligned with the dark-blue upper region of bg_beranda
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = statusBarTopPadding + 8.dp, bottom = 26.dp)
+                    .padding(top = statusBarTopPadding + 8.dp, bottom = 20.dp)
                     .padding(horizontal = 18.dp)
             ) {
                 // Top Brand & Action Icons Row
@@ -630,128 +852,82 @@ fun BerandaScreenView(
                 }
             }
 
-        // Sync progress indicator if refreshing
-        if (isRefreshing) {
-            LinearProgressIndicator(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.5.dp),
-                color = Color(0xFF005FAF),
-                trackColor = Color(0xFFE0ECFA)
-            )
-        }
-
-        // Offline / Update mini notice banner inside white sheet when applicable
-        AnimatedVisibility(visible = isShowingCachedOfflineData) {
-            Surface(
-                color = Color(0xFFEFF6FF),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable { viewModel.refreshSpreadsheetData(force = true) }
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CloudOff,
-                        contentDescription = "Offline",
-                        tint = Color(0xFF1D4ED8),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = "Mode offline • Menampilkan cache lokal Room",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color(0xFF1E3A8A),
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        text = "Sinkron",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF005FAF)
-                    )
-                }
-            }
-        }
-
-        // 2. Main White Dashboard Body
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(top = 2.dp, bottom = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Top Action Card: Kelolaan Nasabah (matching reference top pill card)
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 60.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .testTag("beranda_kelolaan_card")
-                    .clickable(onClick = onOpenKelolaan),
-                shape = RoundedCornerShape(18.dp),
-                color = Color(0xFFF8FBFF),
-                shadowElevation = 3.dp,
-                border = BorderStroke(1.dp, Color(0xFFE2ECF8))
-            ) {
-                Row(
+            // Sync progress indicator pinned right below the frozen hero
+            if (isRefreshing) {
+                LinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(Color(0xFFE1EEFF), RoundedCornerShape(12.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Groups,
-                            contentDescription = "Kelolaan Nasabah",
-                            tint = Color(0xFF005FAF),
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Kelolaan Nasabah",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
-                        )
-                        val kelolaanSubtitle = if (loggedInPN.isBlank()) {
-                            "Login PN Mantri untuk melihat kelolaan pribadi"
-                        } else {
-                            val dateSuffix = if (latestDateText.isNotBlank()) " • $latestDateText" else ""
-                            "${formatDoubleClean(kelolaanActiveSummary.os, formatter)} • ${kelolaanActiveSummary.debtors} Deb$dateSuffix"
-                        }
-                        Text(
-                            text = kelolaanSubtitle,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF475569),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.Default.ChevronRight,
-                        contentDescription = "Buka Kelolaan",
-                        tint = Color(0xFF005FAF),
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
+                        .height(2.5.dp),
+                    color = Color(0xFF005FAF),
+                    trackColor = Color(0xFFE0ECFA)
+                )
             }
 
-            // Moved Kunjungan Button inside Beranda (Quick Action Pill Card)
+            // 2. Scrollable area from Kelolaan Nasabah button card downward
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .clipToBounds()
+                    .verticalScroll(scrollState)
+            ) {
+                // Offline mini notice banner when applicable
+                AnimatedVisibility(
+                    visible = isShowingCachedOfflineData,
+                    enter = expandVertically(
+                        expandFrom = Alignment.Top,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                    ),
+                    exit = shrinkVertically(
+                        shrinkTowards = Alignment.Top,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                    )
+                ) {
+                    Surface(
+                        color = Color(0xFFEFF6FF),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { viewModel.refreshSpreadsheetData(force = true) }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CloudOff,
+                                contentDescription = "Offline",
+                                tint = Color(0xFF1D4ED8),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Mode offline • Menampilkan cache lokal Room",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF1E3A8A),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "Sinkron",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF005FAF)
+                            )
+                        }
+                    }
+                }
+
+                // Main White Dashboard Body
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(top = 6.dp, bottom = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+            // Top Action Card (swapped): Rencana Kunjungan
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -830,44 +1006,352 @@ fun BerandaScreenView(
                 }
             }
 
-            // 3 Pastel KPI Cards Row: Total Nasabah, Tunggakan, Lancar (matching reference image)
+            // Second Action Card (swapped): Kelolaan Nasabah
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 60.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .testTag("beranda_kelolaan_card")
+                    .clickable(onClick = onOpenKelolaan),
+                shape = RoundedCornerShape(18.dp),
+                color = Color(0xFFF8FBFF),
+                shadowElevation = 3.dp,
+                border = BorderStroke(1.dp, Color(0xFFE2ECF8))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(Color(0xFFE1EEFF), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Groups,
+                            contentDescription = "Kelolaan Nasabah",
+                            tint = Color(0xFF005FAF),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Kelolaan Nasabah",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A),
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (loggedInPN.isNotBlank()) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Person,
+                                        contentDescription = "Debitur",
+                                        tint = Color(0xFF005FAF),
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Text(
+                                        text = formatter.format(kelolaanActiveSummary.debtors),
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF005FAF),
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                        val kelolaanSubtitle = if (loggedInPN.isBlank()) {
+                            "Login PN Mantri untuk melihat kelolaan pribadi"
+                        } else {
+                            val dateSuffix = if (latestDateText.isNotBlank()) " • $latestDateText" else ""
+                            "${formatFullIdr(kelolaanActiveSummary.os, formatter)}$dateSuffix"
+                        }
+                        Text(
+                            text = kelolaanSubtitle,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF475569),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = "Buka Kelolaan",
+                        tint = Color(0xFF005FAF),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+
+            // 3 Horizontal Kolek Donut Info Buttons: Lancar, SML, NPL (% inside donut circle)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                BerandaKpiPastelCard(
-                    title = "Total Nasabah",
-                    value = formatter.format(totalDebtors),
-                    icon = Icons.Default.Groups,
-                    iconTint = Color(0xFF005FAF),
-                    containerColor = Color(0xFFEEF5FF),
-                    borderColor = Color(0xFFDBEAFE),
-                    modifier = Modifier.weight(1f),
-                    testTag = "beranda_kpi_total_nasabah"
-                )
-                BerandaKpiPastelCard(
-                    title = "Tunggakan",
-                    value = formatBerandaMillion(tunggakanOs),
-                    icon = Icons.Default.Warning,
-                    iconTint = Color(0xFFF59E0B),
-                    containerColor = Color(0xFFFFF7EC),
-                    borderColor = Color(0xFFFDE6C4),
-                    modifier = Modifier.weight(1f),
-                    testTag = "beranda_kpi_tunggakan"
-                )
-                BerandaKpiPastelCard(
+                BerandaKolekDonutButton(
                     title = "Lancar",
-                    value = formatBerandaMillion(lancarOs),
-                    icon = Icons.Default.CheckCircle,
-                    iconTint = Color(0xFF16A34A),
-                    containerColor = Color(0xFFECFDF3),
-                    borderColor = Color(0xFFD1FAE5),
-                    modifier = Modifier.weight(1f),
-                    testTag = "beranda_kpi_lancar"
+                    osText = formatFullIdr(lancarOs, formatter),
+                    debText = formatter.format(lancarDeb),
+                    percentage = lancarOsPct,
+                    accentColor = Color(0xFF16A34A),
+                    trackColor = Color(0xFFDCFCE7),
+                    containerColor = Color(0xFFF0FDF4),
+                    borderColor = Color(0xFFDCFCE7),
+                    onClick = {
+                        if (effectiveScope == BerandaScope.KELOLAAN) onOpenKelolaan() else onOpenMonitoring()
+                        viewModel.resetActiveFiltersForQuickJump()
+                        viewModel.filterKolek.value = "Lancar"
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("beranda_kpi_lancar")
+                )
+                BerandaKolekDonutButton(
+                    title = "SML",
+                    osText = formatFullIdr(smlOs, formatter),
+                    debText = formatter.format(smlDeb),
+                    percentage = smlOsPct,
+                    accentColor = Color(0xFFD97706),
+                    trackColor = Color(0xFFFEF3C7),
+                    containerColor = Color(0xFFFFFBEB),
+                    borderColor = Color(0xFFFDE68A),
+                    onClick = {
+                        if (effectiveScope == BerandaScope.KELOLAAN) onOpenKelolaan() else onOpenMonitoring()
+                        viewModel.resetActiveFiltersForQuickJump()
+                        viewModel.filterKolek.value = "SML"
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("beranda_kpi_sml")
+                )
+                BerandaKolekDonutButton(
+                    title = "NPL",
+                    osText = formatFullIdr(nplOs, formatter),
+                    debText = formatter.format(nplDeb),
+                    percentage = nplOsPct,
+                    accentColor = Color(0xFFDC2626),
+                    trackColor = Color(0xFFFEE2E2),
+                    containerColor = Color(0xFFFEF2F2),
+                    borderColor = Color(0xFFFEE2E2),
+                    onClick = {
+                        if (effectiveScope == BerandaScope.KELOLAAN) onOpenKelolaan() else onOpenMonitoring()
+                        viewModel.resetActiveFiltersForQuickJump()
+                        viewModel.filterKolek.value = "NPL"
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("beranda_kpi_npl")
                 )
             }
 
-            // Ringkasan Portofolio Section Header
+            // Segmen Kelolaan Section (3 columns per row showing OS and Debitur)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("beranda_segmen_kelolaan_section"),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PieChart,
+                            contentDescription = null,
+                            tint = Color(0xFF005FAF),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Segmen Kelolaan",
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                    }
+                    Text(
+                        text = if (effectiveScope == BerandaScope.KELOLAAN) {
+                            "${segmenKelolaanGroups.size} Segmen"
+                        } else {
+                            "Unit • ${segmenKelolaanGroups.size} Segmen"
+                        },
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF64748B)
+                    )
+                }
+
+                if (segmenKelolaanGroups.isEmpty()) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFFF8FAFC),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+                    ) {
+                        Text(
+                            text = if (loggedInPN.isBlank()) {
+                                "Login PN Mantri untuk melihat rincian segmen kelolaan"
+                            } else {
+                                "Data segmen kelolaan belum tersedia"
+                            },
+                            fontSize = 11.5.sp,
+                            color = Color(0xFF64748B),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 14.dp)
+                        )
+                    }
+                } else {
+                    val chunkedSegmen = segmenKelolaanGroups.chunked(3)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        chunkedSegmen.forEach { rowItems ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                rowItems.forEach { (segName, segOs, segDeb) ->
+                                    BerandaSegmenMiniCard(
+                                        title = segName,
+                                        osText = formatFullIdr(segOs, formatter),
+                                        debText = formatter.format(segDeb),
+                                        onClick = {
+                                            if (effectiveScope == BerandaScope.KELOLAAN) onOpenKelolaan() else onOpenMonitoring()
+                                            viewModel.resetActiveFiltersForQuickJump()
+                                            viewModel.filterSegmen.value = segName
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("beranda_segmen_${segName.lowercase().replace(" ", "_")}")
+                                    )
+                                }
+                                repeat(3 - rowItems.size) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Pantauan Khusus Section (below Segmen Kelolaan): Tusim, Tucil <100 rb, Tunggakan <6 bln
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("beranda_pantauan_khusus_section"),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = Color(0xFF0F766E),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Pantauan Tunggakan",
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                    }
+                    Text(
+                        text = effectiveScope.label,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF64748B)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Max),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    BerandaAlertMiniCard(
+                        title = "Tusim",
+                        osText = formatFullIdr(tusimSummary.os, formatter),
+                        debText = formatter.format(tusimSummary.debtors),
+                        accentColor = Color(0xFF0F766E),
+                        containerColor = Color(0xFFF0FDFA),
+                        borderColor = Color(0xFF99F6E4),
+                        onClick = {
+                            if (effectiveScope == BerandaScope.KELOLAAN) onOpenKelolaan() else onOpenMonitoring()
+                            viewModel.resetActiveFiltersForQuickJump()
+                            viewModel.filterTusim.value = true
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .testTag("beranda_card_tusim")
+                    )
+                    BerandaAlertMiniCard(
+                        title = "Tucil <100 rb",
+                        osText = formatFullIdr(tucilSummary.os, formatter),
+                        debText = formatter.format(tucilSummary.debtors),
+                        accentColor = Color(0xFFC2410C),
+                        containerColor = Color(0xFFFFF7ED),
+                        borderColor = Color(0xFFFED7AA),
+                        onClick = {
+                            if (effectiveScope == BerandaScope.KELOLAAN) onOpenKelolaan() else onOpenMonitoring()
+                            viewModel.resetActiveFiltersForQuickJump()
+                            viewModel.filterTucil.value = true
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .testTag("beranda_card_tucil")
+                    )
+                    BerandaAlertMiniCard(
+                        title = "Tunggakan <6 bln",
+                        osText = formatFullIdr(tunggakanUnder6Summary.os, formatter),
+                        debText = formatter.format(tunggakanUnder6Summary.debtors),
+                        accentColor = Color(0xFFBE123C),
+                        containerColor = Color(0xFFFFF1F2),
+                        borderColor = Color(0xFFFECDD3),
+                        onClick = {
+                            if (effectiveScope == BerandaScope.KELOLAAN) onOpenKelolaan() else onOpenMonitoring()
+                            viewModel.resetActiveFiltersForQuickJump()
+                            viewModel.filterTunggakanKurang6Bln.value = true
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .testTag("beranda_card_tunggakan_under_6")
+                    )
+                }
+            }
+
+            // Realisasi & Netdisburse Section Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -886,7 +1370,7 @@ fun BerandaScreenView(
                         modifier = Modifier.size(20.dp)
                     )
                     Text(
-                        text = "Ringkasan Portofolio",
+                        text = "Realisasi & Netdisburse",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0F172A)
@@ -910,6 +1394,7 @@ fun BerandaScreenView(
                                         BerandaScope.KELOLAAN
                                     }
                                     selectedChartMonthIndex = -1
+                                    showRealisasiDetailSheet = false
                                 }
                                 .testTag("beranda_scope_toggle")
                         ) {
@@ -947,67 +1432,85 @@ fun BerandaScreenView(
                 }
             }
 
-            // Blue Gradient 12-Month Portfolio Chart Card (OS, SML, NPL)
-            Portfolio12MonthChartCard(
-                points = monthlyPoints,
-                selectedFilter = chartFilter,
-                onSelectFilter = { newFilter ->
-                    chartFilter = if (chartFilter == newFilter && newFilter != PortfolioChartFilter.ALL) {
-                        PortfolioChartFilter.ALL
-                    } else {
-                        newFilter
-                    }
+            // Blue Gradient Rounded Bar Chart Card: Realisasi (belakang) & Netdisburse (depan)
+            RealisasiBarChartCard(
+                points = realisasiPoints,
+                selectedPeriodMonths = realisasiPeriodMonths,
+                onSelectPeriodMonths = { months ->
+                    realisasiPeriodMonths = months
+                    selectedChartMonthIndex = -1
+                    showRealisasiDetailSheet = false
                 },
                 selectedMonthIndex = selectedChartMonthIndex,
                 onSelectMonthIndex = { idx ->
-                    selectedChartMonthIndex = if (selectedChartMonthIndex == idx) -1 else idx
+                    selectedChartMonthIndex = idx
+                    showRealisasiDetailSheet = true
                 },
                 scopeLabel = effectiveScope.label,
-                currentOs = activeScopeSummary.os,
-                currentSml = activeScopeKolek.sml.os,
-                currentNpl = activeScopeKolek.npl.os,
                 formatter = formatter
             )
 
-            // Bottom 2 Donut Progress Cards: Nasabah Lancar & Nasabah Tunggakan
+            // Tren Historis NPL & SML Section Header
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                BerandaDonutSummaryCard(
-                    title = "Nasabah Lancar",
-                    countText = formatter.format(lancarDebtors),
-                    percentage = lancarPct,
-                    accentColor = Color(0xFF16A34A),
-                    trackColor = Color(0xFFDCFCE7),
-                    containerColor = Color(0xFFF0FDF4),
-                    borderColor = Color(0xFFDCFCE7),
-                    onClick = {
-                        viewModel.filterKolek.value = "Lancar"
-                        if (effectiveScope == BerandaScope.KELOLAAN) onOpenKelolaan() else onOpenMonitoring()
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("beranda_card_nasabah_lancar")
-                )
-                BerandaDonutSummaryCard(
-                    title = "Nasabah Tunggakan",
-                    countText = formatter.format(tunggakanDebtors),
-                    percentage = tunggakanPct,
-                    accentColor = Color(0xFFDC2626),
-                    trackColor = Color(0xFFFEE2E2),
-                    containerColor = Color(0xFFFEF2F2),
-                    borderColor = Color(0xFFFEE2E2),
-                    onClick = {
-                        viewModel.filterKolek.value = "SEMUA"
-                        if (effectiveScope == BerandaScope.KELOLAAN) onOpenKelolaan() else onOpenMonitoring()
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("beranda_card_nasabah_tunggakan")
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ShowChart,
+                        contentDescription = null,
+                        tint = Color(0xFFE11D48),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "Tren Historis NPL & SML",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = Color(0xFFF1F5F9)
+                ) {
+                    Text(
+                        text = effectiveScope.label,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF334155),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
             }
+
+            // Dual Line Chart Card: Portfolio Health (SML & NPL Historical Trend)
+            PortfolioHealthLineChartCard(
+                points = kolekTrendPoints,
+                selectedPeriodMonths = trendPeriodMonths,
+                onSelectPeriodMonths = { months ->
+                    trendPeriodMonths = months
+                    selectedTrendMonthIndex = -1
+                },
+                selectedMonthIndex = selectedTrendMonthIndex,
+                onSelectMonthIndex = { idx ->
+                    selectedTrendMonthIndex = if (selectedTrendMonthIndex == idx) -1 else idx
+                },
+                activeFocus = trendFocus,
+                onSelectFocus = { target ->
+                    trendFocus = if (trendFocus == target) KolekTrendFocus.ALL else target
+                },
+                scopeLabel = effectiveScope.label,
+                formatter = formatter
+            )
         }
+            }
         }
     }
 
@@ -1104,23 +1607,50 @@ fun BerandaScreenView(
             }
         )
     }
+
+    val activeRealisasiPoint = realisasiPoints.getOrNull(selectedChartMonthIndex)
+    if (showRealisasiDetailSheet && activeRealisasiPoint != null) {
+        RealisasiDetailBottomSheet(
+            point = activeRealisasiPoint,
+            scopeLabel = effectiveScope.label,
+            formatter = formatter,
+            onDismiss = { showRealisasiDetailSheet = false }
+        )
+    }
 }
 
 @Composable
-private fun BerandaKpiPastelCard(
+private fun BerandaKolekDonutButton(
     title: String,
-    value: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    iconTint: Color,
+    osText: String,
+    debText: String,
+    percentage: Double,
+    accentColor: Color,
+    trackColor: Color,
     containerColor: Color,
     borderColor: Color,
-    modifier: Modifier = Modifier,
-    testTag: String
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
+    val animatedSweep by animateFloatAsState(
+        targetValue = ((percentage / 100.0) * 360.0).toFloat().coerceIn(0f, 360f),
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "kolek_donut_sweep_$title"
+    )
+    val pctText = if (percentage >= 99.95) {
+        "100%"
+    } else {
+        "${String.format(Locale.US, "%.1f", percentage)}%"
+    }
+
     Surface(
         modifier = modifier
-            .heightIn(min = 90.dp)
-            .testTag(testTag),
+            .heightIn(min = 96.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         color = containerColor,
         border = BorderStroke(1.dp, borderColor)
@@ -1128,79 +1658,204 @@ private fun BerandaKpiPastelCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .padding(horizontal = 7.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = title,
-                tint = iconTint,
-                modifier = Modifier.size(24.dp)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = accentColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(1.5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "Debitur",
+                        tint = accentColor.copy(alpha = 0.85f),
+                        modifier = Modifier.size(11.dp)
+                    )
+                    Text(
+                        text = debText,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF334155),
+                        maxLines = 1
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier.size(38.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val strokeW = 4.dp.toPx()
+                        val arcSize = Size(size.width - strokeW, size.height - strokeW)
+                        val topLeft = Offset(strokeW * 0.5f, strokeW * 0.5f)
+                        drawArc(
+                            color = trackColor,
+                            startAngle = 0f,
+                            sweepAngle = 360f,
+                            useCenter = false,
+                            topLeft = topLeft,
+                            size = arcSize,
+                            style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                        )
+                        if (animatedSweep > 0f) {
+                            drawArc(
+                                color = accentColor,
+                                startAngle = -90f,
+                                sweepAngle = animatedSweep,
+                                useCenter = false,
+                                topLeft = topLeft,
+                                size = arcSize,
+                                style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                            )
+                        }
+                    }
+                    Text(
+                        text = pctText,
+                        fontSize = 7.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = accentColor,
+                        maxLines = 1
+                    )
+                }
+            }
+
             Text(
-                text = title,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color(0xFF475569),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center
-            )
-            Text(
-                text = value,
-                fontSize = 15.sp,
+                text = osText,
+                fontSize = adaptiveOsFontSize(osText, maxSp = 10f),
+                letterSpacing = (-0.3).sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color(0xFF0F172A),
+                textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }
 }
 
 @Composable
-private fun Portfolio12MonthChartCard(
-    points: List<MonthlyPortfolioPoint>,
-    selectedFilter: PortfolioChartFilter,
-    onSelectFilter: (PortfolioChartFilter) -> Unit,
+private fun BerandaSegmenMiniCard(
+    title: String,
+    osText: String,
+    debText: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .heightIn(min = 56.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFFF8FBFF),
+        border = BorderStroke(1.dp, Color(0xFFDBEAFE))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 7.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF005FAF),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 2.dp)
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(1.5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "Debitur",
+                        tint = Color(0xFF005FAF),
+                        modifier = Modifier.size(10.5.dp)
+                    )
+                    Text(
+                        text = debText,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF334155),
+                        maxLines = 1
+                    )
+                }
+            }
+            Text(
+                text = osText,
+                fontSize = adaptiveOsFontSize(osText, maxSp = 10f),
+                letterSpacing = (-0.3).sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color(0xFF0F172A),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun RealisasiBarChartCard(
+    points: List<MonthlyRealisasiPoint>,
+    selectedPeriodMonths: Int,
+    onSelectPeriodMonths: (Int) -> Unit,
     selectedMonthIndex: Int,
     onSelectMonthIndex: (Int) -> Unit,
     scopeLabel: String,
-    currentOs: Double,
-    currentSml: Double,
-    currentNpl: Double,
     formatter: NumberFormat
 ) {
-    val osLineColor = Color(0xFF7DD3FC) // Crisp bright cyan-white
-    val smlLineColor = Color(0xFFFBBF24) // Warm amber gold
-    val nplLineColor = Color(0xFFFF6B81) // Coral red
-
-    val populatedPoints = remember(points) { points.filter { it.hasData } }
-    val latestPoint = populatedPoints.lastOrNull()
-    val prevPoint = if (populatedPoints.size >= 2) populatedPoints[populatedPoints.size - 2] else null
-
-    val displayOs = latestPoint?.os?.takeIf { it > 0.0 } ?: currentOs
-    val displaySml = latestPoint?.sml?.takeIf { it > 0.0 } ?: currentSml
-    val displayNpl = latestPoint?.npl?.takeIf { it > 0.0 } ?: currentNpl
-
-    val activeMetricValue = when (selectedFilter) {
-        PortfolioChartFilter.SML -> displaySml
-        PortfolioChartFilter.NPL -> displayNpl
-        else -> displayOs
+    val totalRealisasi = remember(points) { points.sumOf { it.realisasi } }
+    val totalNetDisburs = remember(points) { points.sumOf { it.netDisburs } }
+    val totalDeb = remember(points) { points.sumOf { it.debtors } }
+    val netRatioPct = remember(totalRealisasi, totalNetDisburs) {
+        if (totalRealisasi > 0.0) (totalNetDisburs / totalRealisasi) * 100.0 else 0.0
     }
-    val prevMetricValue = when (selectedFilter) {
-        PortfolioChartFilter.SML -> prevPoint?.sml
-        PortfolioChartFilter.NPL -> prevPoint?.npl
-        else -> prevPoint?.os
-    }
-    val deltaPct = if (prevMetricValue != null && prevMetricValue > 0.0) {
-        ((activeMetricValue - prevMetricValue) / prevMetricValue) * 100.0
-    } else null
 
-    val smlSharePct = if (displayOs > 0.0) (displaySml / displayOs) * 100.0 else 0.0
-    val nplSharePct = if (displayOs > 0.0) (displayNpl / displayOs) * 100.0 else 0.0
+    var chartAnimationKey by remember { mutableIntStateOf(0) }
+    LaunchedEffect(selectedPeriodMonths, scopeLabel, points.size) {
+        chartAnimationKey++
+    }
+    val barGrowthProgress by animateFloatAsState(
+        targetValue = if (chartAnimationKey >= 0) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "realisasi_bar_growth"
+    )
+
+    val periodOptions = listOf(3, 6, 9, 12)
 
     Surface(
         modifier = Modifier
@@ -1228,151 +1883,233 @@ private fun Portfolio12MonthChartCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Header: Title + Headline Number + Filter Chips
+                // Top Header inside chart card: Scope Caption + 3/6/9/12 Bulan Selector
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = when (selectedFilter) {
-                                PortfolioChartFilter.ALL -> "OS, SML & NPL • 12 Bln ($scopeLabel)"
-                                PortfolioChartFilter.OS -> "Total OS • 12 Bln ($scopeLabel)"
-                                PortfolioChartFilter.SML -> "Kredit SML • 12 Bln ($scopeLabel)"
-                                PortfolioChartFilter.NPL -> "Kredit NPL • 12 Bln ($scopeLabel)"
-                            },
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White.copy(alpha = 0.88f)
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Periode $selectedPeriodMonths Bln • $scopeLabel",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.88f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 6.dp)
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = Color.White.copy(alpha = 0.14f)
+                    ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier.padding(2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = formatCompactIdr(activeMetricValue),
-                                fontSize = 21.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            if (deltaPct != null) {
-                                val isUp = deltaPct >= 0.0
-                                val isGood = if (selectedFilter == PortfolioChartFilter.SML || selectedFilter == PortfolioChartFilter.NPL) !isUp else isUp
-                                val arrow = if (isUp) "▲" else "▼"
-                                val badgeColor = if (isGood) Color(0xFF4ADE80) else Color(0xFFFF8A80)
+                            periodOptions.forEach { months ->
+                                val isSelected = selectedPeriodMonths == months
                                 Surface(
                                     shape = RoundedCornerShape(999.dp),
-                                    color = Color.Black.copy(alpha = 0.18f)
+                                    color = if (isSelected) Color.White else Color.Transparent,
+                                    modifier = Modifier
+                                        .heightIn(min = 28.dp)
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .clickable { onSelectPeriodMonths(months) }
+                                        .testTag("chart_period_${months}m")
                                 ) {
-                                    Text(
-                                        text = "$arrow ${String.format(Locale.US, "%.1f", abs(deltaPct))}%",
-                                        fontSize = 10.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = badgeColor,
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                                    )
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = "${months}B",
+                                            fontSize = 10.sp,
+                                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                            color = if (isSelected) Color(0xFF0051B0) else Color.White.copy(alpha = 0.90f),
+                                            maxLines = 1
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
+                }
 
-                    // Compact 12 Bln pill
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color.White.copy(alpha = 0.14f)
+                // Borderless Top Metrics: Realisasi (belakang) & Netdisburse (depan)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("chart_metric_realisasi"),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 10.dp, height = 7.dp)
+                                    .background(Color(0xFFBAE6FD).copy(alpha = 0.50f), RoundedCornerShape(999.dp))
+                                    .border(0.8.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(999.dp))
+                            )
+                            Text(
+                                text = "Realisasi",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White.copy(alpha = 0.88f),
+                                maxLines = 1
+                            )
+                        }
+                        val realText = formatFullIdr(totalRealisasi, formatter)
                         Text(
-                            text = "12 Bln",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
+                            text = realText,
+                            fontSize = adaptiveOsFontSize(realText, maxSp = 12.5f),
+                            letterSpacing = (-0.25).sp,
+                            fontWeight = FontWeight.ExtraBold,
                             color = Color.White,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = "Debitur",
+                                tint = Color(0xFFBAE6FD),
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Text(
+                                text = "${formatter.format(totalDeb)} Debitur",
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFFBAE6FD),
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("chart_metric_netdisburs"),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 10.dp, height = 7.dp)
+                                    .background(Color(0xFF34D399), RoundedCornerShape(999.dp))
+                            )
+                            Text(
+                                text = "Netdisburse",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White.copy(alpha = 0.88f),
+                                maxLines = 1
+                            )
+                        }
+                        val netText = formatSignedFullIdr(totalNetDisburs, formatter)
+                        Text(
+                            text = netText,
+                            fontSize = adaptiveOsFontSize(netText, maxSp = 12.5f),
+                            letterSpacing = (-0.25).sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFFA7F3D0),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${String.format(Locale.US, "%.1f", netRatioPct)}% dari Realisasi",
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF6EE7B7),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
-                // 3-Item Legend / Interactive Toggle Chips: OS, SML, NPL
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    PortfolioSeriesChip(
-                        label = "OS",
-                        valueText = formatBerandaMillion(displayOs),
-                        dotColor = osLineColor,
-                        isSelected = selectedFilter == PortfolioChartFilter.ALL || selectedFilter == PortfolioChartFilter.OS,
-                        isFocused = selectedFilter == PortfolioChartFilter.OS,
-                        onClick = { onSelectFilter(PortfolioChartFilter.OS) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("chart_chip_os")
-                    )
-                    PortfolioSeriesChip(
-                        label = "SML (${String.format(Locale.US, "%.1f", smlSharePct)}%)",
-                        valueText = formatBerandaMillion(displaySml),
-                        dotColor = smlLineColor,
-                        isSelected = selectedFilter == PortfolioChartFilter.ALL || selectedFilter == PortfolioChartFilter.SML,
-                        isFocused = selectedFilter == PortfolioChartFilter.SML,
-                        onClick = { onSelectFilter(PortfolioChartFilter.SML) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("chart_chip_sml")
-                    )
-                    PortfolioSeriesChip(
-                        label = "NPL (${String.format(Locale.US, "%.1f", nplSharePct)}%)",
-                        valueText = formatBerandaMillion(displayNpl),
-                        dotColor = nplLineColor,
-                        isSelected = selectedFilter == PortfolioChartFilter.ALL || selectedFilter == PortfolioChartFilter.NPL,
-                        isFocused = selectedFilter == PortfolioChartFilter.NPL,
-                        onClick = { onSelectFilter(PortfolioChartFilter.NPL) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("chart_chip_npl")
-                    )
-                }
-
                 // Selected Month Inspection Tooltip (on tap)
                 val inspectedPoint = points.getOrNull(selectedMonthIndex)
-                AnimatedVisibility(visible = inspectedPoint != null) {
+                AnimatedVisibility(
+                    visible = inspectedPoint != null,
+                    enter = expandVertically(
+                        expandFrom = Alignment.Top,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                    ),
+                    exit = shrinkVertically(
+                        shrinkTowards = Alignment.Top,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                    )
+                ) {
                     inspectedPoint?.let { pt ->
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = Color.Black.copy(alpha = 0.24f),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onSelectMonthIndex(selectedMonthIndex) }
                         ) {
-                            Text(
-                                text = if (pt.hasData) {
-                                    "${pt.fullLabel}: OS ${formatBerandaMillion(pt.os)} • SML ${formatBerandaMillion(pt.sml)} • NPL ${formatBerandaMillion(pt.npl)}"
-                                } else {
-                                    "${pt.fullLabel}: Belum ada data bulanan LW321"
-                                },
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White,
-                                textAlign = TextAlign.Center,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = if (pt.hasData) {
+                                        "${pt.fullLabel} (${pt.debtors} Deb): Realisasi ${formatFullIdr(pt.realisasi, formatter)} • Netdisburs ${formatSignedFullIdr(pt.netDisburs, formatter)}"
+                                    } else {
+                                        "${pt.fullLabel}: Belum ada realisasi tercatat"
+                                    },
+                                    fontSize = 9.5.sp,
+                                    lineHeight = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = "Lihat rincian nasabah",
+                                    tint = Color.White.copy(alpha = 0.85f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
                 }
 
-                // 12-Month Line Chart Canvas
+                // Rounded Layered Bar Chart Canvas:
+                // Realisasi rendered BEHIND (shadow/backdrop) and Netdisburse rendered IN FRONT
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(118.dp)
-                        .testTag("beranda_12m_chart")
+                        .height(136.dp)
+                        .testTag("beranda_realisasi_bar_chart")
                         .pointerInput(points) {
                             detectTapGestures { offset ->
                                 if (points.isNotEmpty() && size.width > 0) {
-                                    val step = size.width.toFloat() / (points.size - 1).coerceAtLeast(1)
-                                    val idx = ((offset.x + step * 0.5f) / step).toInt().coerceIn(0, points.lastIndex)
+                                    val padPx = 4.dp.toPx()
+                                    val plotW = (size.width.toFloat() - padPx * 2f).coerceAtLeast(1f)
+                                    val slotW = plotW / points.size.toFloat()
+                                    val idx = ((offset.x - padPx) / slotW).toInt().coerceIn(0, points.lastIndex)
                                     onSelectMonthIndex(idx)
                                 }
                             }
@@ -1381,16 +2118,17 @@ private fun Portfolio12MonthChartCard(
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val w = size.width
                         val h = size.height
-                        val topPad = 10.dp.toPx()
-                        val bottomPad = 10.dp.toPx()
-                        val chartH = (h - topPad - bottomPad).coerceAtLeast(10f)
-                        val count = points.size.coerceAtLeast(2)
-                        val leftPad = 8.dp.toPx()
-                        val rightPad = 8.dp.toPx()
-                        val plotW = (w - leftPad - rightPad).coerceAtLeast(10f)
-                        val stepX = plotW / (count - 1).toFloat()
+                        val topPad = 8.dp.toPx()
+                        val bottomPad = 4.dp.toPx()
+                        val chartH = (h - topPad - bottomPad).coerceAtLeast(12f)
+                        val count = points.size.coerceAtLeast(1)
+                        val leftPad = 4.dp.toPx()
+                        val rightPad = 4.dp.toPx()
+                        val plotW = (w - leftPad - rightPad).coerceAtLeast(12f)
+                        val slotW = plotW / count.toFloat()
+                        val bottomY = topPad + chartH
 
-                        // Horizontal subtle guide lines
+                        // Subtle horizontal guide lines
                         for (g in 0..3) {
                             val gy = topPad + (chartH / 3f) * g
                             drawLine(
@@ -1401,191 +2139,463 @@ private fun Portfolio12MonthChartCard(
                             )
                         }
 
-                        // Highlight vertical cursor if a month is tapped
-                        if (selectedMonthIndex in points.indices) {
-                            val cursorX = leftPad + selectedMonthIndex * stepX
-                            drawLine(
-                                color = Color.White.copy(alpha = 0.45f),
-                                start = Offset(cursorX, topPad),
-                                end = Offset(cursorX, topPad + chartH),
-                                strokeWidth = 1.2.dp.toPx()
-                            )
-                        }
+                        val maxVal = points.maxOfOrNull {
+                            maxOf(it.realisasi, it.netDisburs.coerceAtLeast(0.0))
+                        }?.takeIf { it > 0.0 } ?: 1.0
 
-                        fun drawSeries(
-                            values: List<Double>,
-                            validFlags: List<Boolean>,
-                            lineColor: Color,
-                            bandMinFrac: Float,
-                            bandMaxFrac: Float,
-                            drawAreaFill: Boolean
-                        ) {
-                            val validVals = values.filterIndexed { idx, v -> validFlags[idx] && v >= 0.0 }
-                            if (validVals.isEmpty()) return
-                            val rawMin = validVals.minOrNull() ?: 0.0
-                            val rawMax = validVals.maxOrNull() ?: 0.0
-                            val range = (rawMax - rawMin).takeIf { it > 0.0 } ?: (rawMax * 0.2).coerceAtLeast(1.0)
+                        val backBarW = (slotW * 0.54f).coerceIn(10.dp.toPx(), 26.dp.toPx())
+                        val frontBarW = (backBarW * 0.72f).coerceIn(7.dp.toPx(), 19.dp.toPx())
+                        val layerOffset = ((backBarW - frontBarW) * 0.45f + 1.5.dp.toPx()).coerceAtMost(slotW * 0.14f)
 
-                            val coords = mutableListOf<Pair<Int, Offset>>()
-                            points.forEachIndexed { idx, _ ->
-                                if (validFlags[idx]) {
-                                    val normalized = if (rawMax == rawMin) {
-                                        0.5f
-                                    } else {
-                                        ((values[idx] - rawMin) / range).toFloat().coerceIn(0f, 1f)
-                                    }
-                                    val bandY = bandMinFrac + normalized * (bandMaxFrac - bandMinFrac)
-                                    val py = topPad + chartH * (1f - bandY)
-                                    val px = leftPad + idx * stepX
-                                    coords.add(idx to Offset(px, py))
-                                }
+                        points.forEachIndexed { idx, pt ->
+                            val cx = leftPad + slotW * idx + slotW * 0.5f
+                            val isSelectedBar = idx == selectedMonthIndex
+                            val dimAlpha = if (selectedMonthIndex == -1 || isSelectedBar) 1f else 0.45f
+
+                            if (isSelectedBar) {
+                                val highlightW = (slotW * 0.84f).coerceAtLeast(backBarW + 6.dp.toPx())
+                                drawRoundRect(
+                                    color = Color.White.copy(alpha = 0.12f),
+                                    topLeft = Offset(cx - highlightW * 0.5f, topPad * 0.5f),
+                                    size = Size(highlightW, chartH + topPad * 0.5f),
+                                    cornerRadius = CornerRadius(10.dp.toPx(), 10.dp.toPx())
+                                )
                             }
-                            if (coords.isEmpty()) return
 
-                            if (coords.size >= 2) {
-                                val linePath = Path().apply {
-                                    moveTo(coords.first().second.x, coords.first().second.y)
-                                    for (i in 0 until coords.lastIndex) {
-                                        val p0 = coords[i].second
-                                        val p1 = coords[i + 1].second
-                                        val midX = (p0.x + p1.x) * 0.5f
-                                        cubicTo(midX, p0.y, midX, p1.y, p1.x, p1.y)
-                                    }
-                                }
+                            val realVal = pt.realisasi.coerceAtLeast(0.0)
+                            val netVal = pt.netDisburs.coerceAtLeast(0.0)
 
-                                if (drawAreaFill) {
-                                    val areaPath = Path().apply {
-                                        addPath(linePath)
-                                        lineTo(coords.last().second.x, topPad + chartH)
-                                        lineTo(coords.first().second.x, topPad + chartH)
-                                        close()
-                                    }
-                                    drawPath(
-                                        path = areaPath,
+                            if (realVal <= 0.0 && netVal <= 0.0) {
+                                val emptyH = 4.dp.toPx()
+                                drawRoundRect(
+                                    color = Color.White.copy(alpha = 0.18f * dimAlpha),
+                                    topLeft = Offset(cx - backBarW * 0.45f, bottomY - emptyH),
+                                    size = Size(backBarW * 0.9f, emptyH),
+                                    cornerRadius = CornerRadius(emptyH * 0.5f, emptyH * 0.5f)
+                                )
+                            } else {
+                                // 1. Back Bar: Realisasi (shadow/backdrop rounded bar behind Netdisburse)
+                                if (realVal > 0.0) {
+                                    val backH = ((realVal / maxVal).toFloat() * chartH * barGrowthProgress)
+                                        .coerceAtLeast(backBarW)
+                                        .coerceAtMost(chartH)
+                                    val backTop = bottomY - backH
+                                    val backLeft = cx - backBarW * 0.5f - layerOffset * 0.55f
+                                    val backRadius = CornerRadius(backBarW * 0.5f, backBarW * 0.5f)
+
+                                    drawRoundRect(
                                         brush = Brush.verticalGradient(
                                             colors = listOf(
-                                                lineColor.copy(alpha = 0.28f),
-                                                lineColor.copy(alpha = 0.02f)
+                                                Color(0xFFE0F2FE).copy(alpha = 0.44f * dimAlpha),
+                                                Color(0xFF93C5FD).copy(alpha = 0.22f * dimAlpha)
                                             ),
-                                            startY = topPad,
-                                            endY = topPad + chartH
-                                        )
+                                            startY = backTop,
+                                            endY = bottomY
+                                        ),
+                                        topLeft = Offset(backLeft, backTop),
+                                        size = Size(backBarW, backH),
+                                        cornerRadius = backRadius
+                                    )
+                                    drawRoundRect(
+                                        color = Color.White.copy(alpha = 0.42f * dimAlpha),
+                                        topLeft = Offset(backLeft, backTop),
+                                        size = Size(backBarW, backH),
+                                        cornerRadius = backRadius,
+                                        style = Stroke(width = 1.dp.toPx())
                                     )
                                 }
 
-                                drawPath(
-                                    path = linePath,
-                                    color = lineColor,
-                                    style = Stroke(
-                                        width = 2.4.dp.toPx(),
-                                        cap = StrokeCap.Round,
-                                        join = StrokeJoin.Round
-                                    )
-                                )
-                            }
+                                // 2. Front Bar: Netdisburse (vivid emerald rounded bar in front of Realisasi)
+                                if (netVal > 0.0) {
+                                    val frontH = ((netVal / maxVal).toFloat() * chartH * barGrowthProgress)
+                                        .coerceAtLeast(frontBarW)
+                                        .coerceAtMost(chartH)
+                                    val frontTop = bottomY - frontH
+                                    val frontLeft = cx - frontBarW * 0.5f + layerOffset * 0.65f
+                                    val frontRadius = CornerRadius(frontBarW * 0.5f, frontBarW * 0.5f)
 
-                            coords.forEach { (idx, pt) ->
-                                val isPointSelected = idx == selectedMonthIndex
-                                if (isPointSelected) {
-                                    drawCircle(
-                                        color = lineColor.copy(alpha = 0.35f),
-                                        radius = 7.dp.toPx(),
-                                        center = pt
+                                    drawRoundRect(
+                                        brush = Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color(0xFF6EE7B7).copy(alpha = dimAlpha),
+                                                Color(0xFF10B981).copy(alpha = dimAlpha)
+                                            ),
+                                            startY = frontTop,
+                                            endY = bottomY
+                                        ),
+                                        topLeft = Offset(frontLeft, frontTop),
+                                        size = Size(frontBarW, frontH),
+                                        cornerRadius = frontRadius
                                     )
                                 }
-                                drawCircle(
-                                    color = lineColor,
-                                    radius = if (isPointSelected) 4.2.dp.toPx() else 3.dp.toPx(),
-                                    center = pt
-                                )
-                                drawCircle(
-                                    color = Color(0xFF004B9B),
-                                    radius = if (isPointSelected) 1.8.dp.toPx() else 1.2.dp.toPx(),
-                                    center = pt
-                                )
-                            }
-                        }
-
-                        val flags = points.map { it.hasData }
-                        when (selectedFilter) {
-                            PortfolioChartFilter.ALL -> {
-                                // Clear visual bands so OS, SML, and NPL trends never collapse into one flat line
-                                drawSeries(
-                                    values = points.map { it.npl },
-                                    validFlags = flags,
-                                    lineColor = nplLineColor,
-                                    bandMinFrac = 0.06f,
-                                    bandMaxFrac = 0.36f,
-                                    drawAreaFill = false
-                                )
-                                drawSeries(
-                                    values = points.map { it.sml },
-                                    validFlags = flags,
-                                    lineColor = smlLineColor,
-                                    bandMinFrac = 0.34f,
-                                    bandMaxFrac = 0.66f,
-                                    drawAreaFill = false
-                                )
-                                drawSeries(
-                                    values = points.map { it.os },
-                                    validFlags = flags,
-                                    lineColor = osLineColor,
-                                    bandMinFrac = 0.64f,
-                                    bandMaxFrac = 0.94f,
-                                    drawAreaFill = true
-                                )
-                            }
-                            PortfolioChartFilter.OS -> {
-                                drawSeries(
-                                    values = points.map { it.os },
-                                    validFlags = flags,
-                                    lineColor = osLineColor,
-                                    bandMinFrac = 0.12f,
-                                    bandMaxFrac = 0.90f,
-                                    drawAreaFill = true
-                                )
-                            }
-                            PortfolioChartFilter.SML -> {
-                                drawSeries(
-                                    values = points.map { it.sml },
-                                    validFlags = flags,
-                                    lineColor = smlLineColor,
-                                    bandMinFrac = 0.12f,
-                                    bandMaxFrac = 0.90f,
-                                    drawAreaFill = true
-                                )
-                            }
-                            PortfolioChartFilter.NPL -> {
-                                drawSeries(
-                                    values = points.map { it.npl },
-                                    validFlags = flags,
-                                    lineColor = nplLineColor,
-                                    bandMinFrac = 0.12f,
-                                    bandMaxFrac = 0.90f,
-                                    drawAreaFill = true
-                                )
                             }
                         }
                     }
                 }
 
-                // 12-Month X-Axis Labels
+                // Month X-Axis Labels
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     points.forEachIndexed { idx, pt ->
                         val isActive = idx == selectedMonthIndex || (selectedMonthIndex == -1 && idx == points.lastIndex)
-                        Text(
-                            text = pt.shortLabel,
-                            fontSize = 8.5.sp,
-                            fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Medium,
-                            color = if (isActive) Color.White else if (pt.hasData) Color.White.copy(alpha = 0.78f) else Color.White.copy(alpha = 0.42f),
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
+                        Box(
+                            contentAlignment = Alignment.Center,
                             modifier = Modifier
                                 .weight(1f)
+                                .heightIn(min = 32.dp)
+                                .clip(RoundedCornerShape(8.dp))
                                 .clickable { onSelectMonthIndex(idx) }
+                                .testTag("beranda_realisasi_month_label_$idx")
+                        ) {
+                            Text(
+                                text = pt.shortLabel,
+                                fontSize = if (points.size <= 6) 10.sp else 8.5.sp,
+                                fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Medium,
+                                color = if (isActive) Color.White else if (pt.hasData) Color.White.copy(alpha = 0.80f) else Color.White.copy(alpha = 0.42f),
+                                textAlign = TextAlign.Center,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RealisasiDetailBottomSheet(
+    point: MonthlyRealisasiPoint,
+    scopeLabel: String,
+    formatter: NumberFormat,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var searchQuery by remember(point.yearNumber, point.monthNumber, scopeLabel) {
+        mutableStateOf("")
+    }
+
+    val filteredCustomers by remember(point.customers, searchQuery) {
+        derivedStateOf {
+            val q = searchQuery.trim()
+            if (q.isEmpty()) {
+                point.customers
+            } else {
+                point.customers.filter { item ->
+                    item.namaNasabah.contains(q, ignoreCase = true) ||
+                        item.noRekening.contains(q, ignoreCase = true) ||
+                        item.namaMantri.contains(q, ignoreCase = true) ||
+                        item.segmen.contains(q, ignoreCase = true)
+                }
+            }
+        }
+    }
+
+    val netPct = remember(point.realisasi, point.netDisburs) {
+        if (point.realisasi > 0.0) (point.netDisburs / point.realisasi) * 100.0 else 0.0
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color.White,
+        scrimColor = Color.Black.copy(alpha = 0.45f),
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp)
+                .testTag("beranda_realisasi_bottom_sheet")
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Rincian Realisasi ${point.fullLabel}",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF0F172A),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = Color(0xFFEBF4FF)
+                        ) {
+                            Text(
+                                text = scopeLabel,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF005FAF),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = "Jumlah Debitur",
+                                tint = Color(0xFF475569),
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = "${formatter.format(point.debtors)} Debitur",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF475569)
+                            )
+                        }
+                    }
+                }
+
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.testTag("beranda_realisasi_sheet_close")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Tutup rincian realisasi",
+                        tint = Color(0xFF475569)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Summary Stat Cards (Realisasi & Netdisburse)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFFEFF6FF),
+                    border = BorderStroke(1.dp, Color(0xFFBFDBFE))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = "Total Realisasi",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF1D4ED8)
+                        )
+                        val totalRealText = formatFullIdr(point.realisasi, formatter)
+                        Text(
+                            text = totalRealText,
+                            fontSize = adaptiveOsFontSize(totalRealText, maxSp = 13f),
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF0F172A),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFFECFDF5),
+                    border = BorderStroke(1.dp, Color(0xFFA7F3D0))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = "Netdisburse (${String.format(Locale.US, "%.1f", netPct)}%)",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF047857),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        val totalNetText = formatSignedFullIdr(point.netDisburs, formatter)
+                        Text(
+                            text = totalNetText,
+                            fontSize = adaptiveOsFontSize(totalNetText, maxSp = 13f),
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (point.netDisburs >= 0.0) Color(0xFF065F46) else Color(0xFFBE123C),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            if (point.customers.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("beranda_realisasi_sheet_search"),
+                    placeholder = {
+                        Text(
+                            text = "Cari nama nasabah, rekening, atau mantri...",
+                            fontSize = 12.sp,
+                            color = Color(0xFF94A3B8)
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Cari",
+                            tint = Color(0xFF64748B),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Hapus pencarian",
+                                    tint = Color(0xFF64748B),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF005FAF),
+                        unfocusedBorderColor = Color(0xFFE2E8F0),
+                        focusedContainerColor = Color(0xFFF8FAFC),
+                        unfocusedContainerColor = Color(0xFFF8FAFC)
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (searchQuery.isBlank()) {
+                            "Daftar Nasabah (${filteredCustomers.size})"
+                        } else {
+                            "Hasil Pencarian (${filteredCustomers.size} dari ${point.customers.size})"
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF334155)
+                    )
+                    Text(
+                        text = "Nominal Realisasi",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF64748B)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                HorizontalDivider(color = Color(0xFFE2E8F0))
+                Spacer(modifier = Modifier.height(8.dp))
+            } else {
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            if (point.customers.isEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFFF8FAFC),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 24.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(Color(0xFFEBF4FF), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.BarChart,
+                                contentDescription = null,
+                                tint = Color(0xFF005FAF),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Text(
+                            text = "Belum Ada Data Realisasi",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "Tidak ada nasabah realisasi yang tercatat pada bulan ${point.fullLabel} untuk cakupan $scopeLabel.",
+                            fontSize = 12.sp,
+                            color = Color(0xFF64748B),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else if (filteredCustomers.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 32.dp, horizontal = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Tidak ditemukan nasabah yang cocok dengan \"$searchQuery\".",
+                        fontSize = 12.5.sp,
+                        color = Color(0xFF64748B),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .testTag("beranda_realisasi_sheet_list"),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 24.dp)
+                ) {
+                    itemsIndexed(
+                        items = filteredCustomers,
+                        key = { idx, item -> "${item.noRekening}_${item.namaNasabah}_$idx" }
+                    ) { idx, item ->
+                        RealisasiCustomerRowCard(
+                            index = idx + 1,
+                            item = item,
+                            showMantriName = scopeLabel.equals("Unit", ignoreCase = true),
+                            formatter = formatter,
+                            modifier = Modifier.testTag("beranda_realisasi_sheet_item_$idx")
                         )
                     }
                 }
@@ -1595,54 +2605,698 @@ private fun Portfolio12MonthChartCard(
 }
 
 @Composable
-private fun PortfolioSeriesChip(
+private fun RealisasiCustomerRowCard(
+    index: Int,
+    item: RealisasiCustomerItem,
+    showMantriName: Boolean,
+    formatter: NumberFormat,
+    modifier: Modifier = Modifier
+) {
+    val metaParts = buildList {
+        if (item.tglReal.isNotBlank()) add(formatShortDisplayDate(item.tglReal))
+        if (item.noRekening.isNotBlank()) add(item.noRekening)
+        if (item.segmen.isNotBlank()) add(item.segmen)
+        if (showMantriName && item.namaMantri.isNotBlank() && item.namaMantri != "Blank PN") {
+            add(item.namaMantri)
+        }
+    }
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFFF8FAFC),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .background(Color(0xFFDBEAFE), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "$index",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF005FAF),
+                    maxLines = 1
+                )
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = item.namaNasabah,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (metaParts.isNotEmpty()) {
+                    Text(
+                        text = metaParts.joinToString(" • "),
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF64748B),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                val realText = formatFullIdr(item.realisasi, formatter)
+                Text(
+                    text = realText,
+                    fontSize = adaptiveOsFontSize(realText, maxSp = 12.5f),
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF0051B0),
+                    maxLines = 1
+                )
+                val netText = formatSignedFullIdr(item.netDisburs, formatter)
+                Text(
+                    text = "Net: $netText",
+                    fontSize = adaptiveOsFontSize(netText, maxSp = 10f),
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (item.netDisburs >= 0.0) Color(0xFF059669) else Color(0xFFBE123C),
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PortfolioHealthLineChartCard(
+    points: List<MonthlyKolekTrendPoint>,
+    selectedPeriodMonths: Int,
+    onSelectPeriodMonths: (Int) -> Unit,
+    selectedMonthIndex: Int,
+    onSelectMonthIndex: (Int) -> Unit,
+    activeFocus: KolekTrendFocus,
+    onSelectFocus: (KolekTrendFocus) -> Unit,
+    scopeLabel: String,
+    formatter: NumberFormat
+) {
+    val smlColor = Color(0xFFD97706)
+    val nplColor = Color(0xFFE11D48)
+
+    val validPoints = remember(points) { points.filter { it.hasData } }
+    val activeIdx = if (selectedMonthIndex in points.indices && points[selectedMonthIndex].hasData) {
+        selectedMonthIndex
+    } else {
+        points.indexOfLast { it.hasData }
+    }
+    val currentPoint = points.getOrNull(activeIdx)
+    val prevPoint = remember(points, activeIdx) {
+        if (activeIdx > 0) {
+            (activeIdx - 1 downTo 0).firstNotNullOfOrNull { i ->
+                points[i].takeIf { it.hasData }
+            }
+        } else null
+    }
+
+    val smlDelta = if (currentPoint != null && prevPoint != null) currentPoint.smlPct - prevPoint.smlPct else null
+    val nplDelta = if (currentPoint != null && prevPoint != null) currentPoint.nplPct - prevPoint.nplPct else null
+
+    var lineAnimKey by remember { mutableIntStateOf(0) }
+    LaunchedEffect(selectedPeriodMonths, scopeLabel, validPoints.size) {
+        lineAnimKey++
+    }
+    val lineProgress by animateFloatAsState(
+        targetValue = if (lineAnimKey >= 0) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "portfolio_health_line_progress"
+    )
+
+    val rawMaxPct = remember(validPoints, activeFocus) {
+        validPoints.maxOfOrNull { pt ->
+            when (activeFocus) {
+                KolekTrendFocus.SML -> pt.smlPct
+                KolekTrendFocus.NPL -> pt.nplPct
+                KolekTrendFocus.ALL -> maxOf(pt.smlPct, pt.nplPct)
+            }
+        } ?: 0.0
+    }
+    val yMaxPct = remember(rawMaxPct) {
+        val scaled = (rawMaxPct * 1.22).coerceAtLeast(1.0)
+        when {
+            scaled <= 2.0 -> 2.0
+            scaled <= 5.0 -> kotlin.math.ceil(scaled)
+            else -> kotlin.math.ceil(scaled / 2.0) * 2.0
+        }
+    }
+
+    val periodOptions = listOf(3, 6, 9, 12)
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("beranda_health_line_chart_card"),
+        shape = RoundedCornerShape(20.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        shadowElevation = 3.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Card Header: Caption + 3B/6B/9B/12B selector
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (currentPoint != null) {
+                        "Rasio vs OS • ${currentPoint.fullLabel}"
+                    } else {
+                        "Rasio SML & NPL ($selectedPeriodMonths Bln)"
+                    },
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF475569),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 6.dp)
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = Color(0xFFF1F5F9)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        periodOptions.forEach { months ->
+                            val isSelected = selectedPeriodMonths == months
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = if (isSelected) Color(0xFF005FAF) else Color.Transparent,
+                                modifier = Modifier
+                                    .heightIn(min = 28.dp)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .clickable { onSelectPeriodMonths(months) }
+                                    .testTag("health_chart_period_${months}m")
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "${months}B",
+                                        fontSize = 10.sp,
+                                        fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                        color = if (isSelected) Color.White else Color(0xFF475569),
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Interactive SML & NPL Metric Headers (tap to highlight/isolate a line)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                HealthMetricSummaryHeader(
+                    label = "SML",
+                    pctText = "${String.format(Locale.US, "%.2f", currentPoint?.smlPct ?: 0.0)}%",
+                    osText = formatFullIdr(currentPoint?.smlOs ?: 0.0, formatter),
+                    debCount = currentPoint?.smlDeb ?: 0,
+                    deltaPct = smlDelta,
+                    accentColor = smlColor,
+                    isFocused = activeFocus == KolekTrendFocus.ALL || activeFocus == KolekTrendFocus.SML,
+                    isExplicitlySelected = activeFocus == KolekTrendFocus.SML,
+                    formatter = formatter,
+                    onClick = { onSelectFocus(KolekTrendFocus.SML) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("health_metric_sml")
+                )
+
+                HealthMetricSummaryHeader(
+                    label = "NPL",
+                    pctText = "${String.format(Locale.US, "%.2f", currentPoint?.nplPct ?: 0.0)}%",
+                    osText = formatFullIdr(currentPoint?.nplOs ?: 0.0, formatter),
+                    debCount = currentPoint?.nplDeb ?: 0,
+                    deltaPct = nplDelta,
+                    accentColor = nplColor,
+                    isFocused = activeFocus == KolekTrendFocus.ALL || activeFocus == KolekTrendFocus.NPL,
+                    isExplicitlySelected = activeFocus == KolekTrendFocus.NPL,
+                    formatter = formatter,
+                    onClick = { onSelectFocus(KolekTrendFocus.NPL) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("health_metric_npl")
+                )
+            }
+
+            // Selected Month Inline Detail Banner (when user taps a specific month)
+            val tappedPoint = points.getOrNull(selectedMonthIndex)
+            AnimatedVisibility(
+                visible = tappedPoint != null,
+                enter = expandVertically(
+                    expandFrom = Alignment.Top,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                ),
+                exit = shrinkVertically(
+                    shrinkTowards = Alignment.Top,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
+            ) {
+                tappedPoint?.let { pt ->
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFFF8FAFC),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = if (pt.hasData) {
+                                "${pt.fullLabel}: SML ${String.format(Locale.US, "%.2f", pt.smlPct)}% (${formatFullIdr(pt.smlOs, formatter)}) • NPL ${String.format(Locale.US, "%.2f", pt.nplPct)}% (${formatFullIdr(pt.nplOs, formatter)})"
+                            } else {
+                                "${pt.fullLabel}: Belum ada data posisi OS tercatat"
+                            },
+                            fontSize = 9.5.sp,
+                            lineHeight = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF334155),
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+
+            if (validPoints.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(136.dp)
+                        .background(Color(0xFFF8FAFC), RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Belum ada data historis SML & NPL untuk periode ini.",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF64748B),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+            } else {
+                // Dual Line Chart Canvas with Y-Axis % Labels
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(142.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .width(34.dp)
+                            .fillMaxHeight()
+                            .padding(vertical = 4.dp),
+                        verticalArrangement = Arrangement.SpaceBetween,
+                        horizontalAlignment = Alignment.End
+                    ) {
+                        Text(
+                            text = "${String.format(Locale.US, "%.1f", yMaxPct)}%",
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF94A3B8)
+                        )
+                        Text(
+                            text = "${String.format(Locale.US, "%.1f", yMaxPct * 0.5)}%",
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF94A3B8)
+                        )
+                        Text(
+                            text = "0%",
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF94A3B8)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .testTag("beranda_health_line_chart_canvas")
+                            .pointerInput(points) {
+                                detectTapGestures { offset ->
+                                    if (points.isNotEmpty() && size.width > 0) {
+                                        val padPx = 8.dp.toPx()
+                                        val plotW = (size.width.toFloat() - padPx * 2f).coerceAtLeast(1f)
+                                        val idx = if (points.size == 1) {
+                                            0
+                                        } else {
+                                            val step = plotW / (points.size - 1).toFloat()
+                                            kotlin.math.round((offset.x - padPx) / step).toInt()
+                                                .coerceIn(0, points.lastIndex)
+                                        }
+                                        onSelectMonthIndex(idx)
+                                    }
+                                }
+                            }
+                    ) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val w = size.width
+                            val h = size.height
+                            val topPad = 10.dp.toPx()
+                            val bottomPad = 10.dp.toPx()
+                            val leftPad = 8.dp.toPx()
+                            val rightPad = 8.dp.toPx()
+                            val chartH = (h - topPad - bottomPad).coerceAtLeast(12f)
+                            val plotW = (w - leftPad - rightPad).coerceAtLeast(12f)
+                            val bottomY = topPad + chartH
+
+                            val dashEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
+                            for (g in 0..2) {
+                                val gy = topPad + (chartH / 2f) * g
+                                drawLine(
+                                    color = Color(0xFFE2E8F0),
+                                    start = Offset(leftPad, gy),
+                                    end = Offset(w - rightPad, gy),
+                                    strokeWidth = 1.dp.toPx(),
+                                    pathEffect = if (g < 2) dashEffect else null
+                                )
+                            }
+
+                            fun xAt(index: Int): Float {
+                                return if (points.size <= 1) {
+                                    leftPad + plotW * 0.5f
+                                } else {
+                                    leftPad + (index.toFloat() / (points.size - 1).toFloat()) * plotW
+                                }
+                            }
+
+                            fun yAt(pct: Double): Float {
+                                val ratio = (pct / yMaxPct).toFloat().coerceIn(0f, 1f)
+                                return bottomY - (ratio * chartH * lineProgress)
+                            }
+
+                            if (selectedMonthIndex in points.indices) {
+                                val selX = xAt(selectedMonthIndex)
+                                drawLine(
+                                    color = Color(0xFF94A3B8).copy(alpha = 0.5f),
+                                    start = Offset(selX, topPad),
+                                    end = Offset(selX, bottomY),
+                                    strokeWidth = 1.2.dp.toPx(),
+                                    pathEffect = dashEffect
+                                )
+                            }
+
+                            fun drawSeries(
+                                color: Color,
+                                isHighlighted: Boolean,
+                                selector: (MonthlyKolekTrendPoint) -> Double
+                            ) {
+                                val seriesAlpha = if (isHighlighted) 1f else 0.22f
+                                val strokePx = if (isHighlighted) 2.6.dp.toPx() else 1.8.dp.toPx()
+
+                                val coords = points.mapIndexedNotNull { idx, pt ->
+                                    if (!pt.hasData) null else idx to Offset(xAt(idx), yAt(selector(pt)))
+                                }
+                                if (coords.isEmpty()) return
+
+                                if (coords.size >= 2) {
+                                    val linePath = Path()
+                                    val fillPath = Path()
+                                    linePath.moveTo(coords[0].second.x, coords[0].second.y)
+                                    fillPath.moveTo(coords[0].second.x, bottomY)
+                                    fillPath.lineTo(coords[0].second.x, coords[0].second.y)
+
+                                    for (i in 0 until coords.lastIndex) {
+                                        val p1 = coords[i].second
+                                        val p2 = coords[i + 1].second
+                                        val midX = (p1.x + p2.x) * 0.5f
+                                        linePath.cubicTo(midX, p1.y, midX, p2.y, p2.x, p2.y)
+                                        fillPath.cubicTo(midX, p1.y, midX, p2.y, p2.x, p2.y)
+                                    }
+
+                                    fillPath.lineTo(coords.last().second.x, bottomY)
+                                    fillPath.close()
+
+                                    if (isHighlighted) {
+                                        drawPath(
+                                            path = fillPath,
+                                            brush = Brush.verticalGradient(
+                                                colors = listOf(
+                                                    color.copy(alpha = 0.16f),
+                                                    color.copy(alpha = 0.01f)
+                                                ),
+                                                startY = topPad,
+                                                endY = bottomY
+                                            )
+                                        )
+                                    }
+
+                                    drawPath(
+                                        path = linePath,
+                                        color = color.copy(alpha = seriesAlpha),
+                                        style = Stroke(
+                                            width = strokePx,
+                                            cap = StrokeCap.Round,
+                                            join = StrokeJoin.Round
+                                        )
+                                    )
+                                }
+
+                                val defaultDotR = if (points.size <= 6) 3.8.dp.toPx() else 3.dp.toPx()
+                                coords.forEach { (idx, ptOffset) ->
+                                    val isNodeActive = idx == activeIdx
+                                    val outerR = if (isNodeActive && isHighlighted) defaultDotR + 2.dp.toPx() else defaultDotR
+                                    if (isNodeActive && isHighlighted) {
+                                        drawCircle(
+                                            color = color.copy(alpha = 0.20f),
+                                            radius = outerR + 4.dp.toPx(),
+                                            center = ptOffset
+                                        )
+                                    }
+                                    drawCircle(
+                                        color = color.copy(alpha = seriesAlpha),
+                                        radius = outerR,
+                                        center = ptOffset
+                                    )
+                                    drawCircle(
+                                        color = Color.White.copy(alpha = seriesAlpha),
+                                        radius = (outerR * 0.45f).coerceAtLeast(1.4.dp.toPx()),
+                                        center = ptOffset
+                                    )
+                                }
+                            }
+
+                            // Draw SML first, then NPL in front
+                            drawSeries(
+                                color = smlColor,
+                                isHighlighted = activeFocus == KolekTrendFocus.ALL || activeFocus == KolekTrendFocus.SML
+                            ) { it.smlPct }
+
+                            drawSeries(
+                                color = nplColor,
+                                isHighlighted = activeFocus == KolekTrendFocus.ALL || activeFocus == KolekTrendFocus.NPL
+                            ) { it.nplPct }
+                        }
+                    }
+                }
+
+                // Month X-Axis Labels aligned with canvas plot area
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 40.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    points.forEachIndexed { idx, pt ->
+                        val isActive = idx == activeIdx
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onSelectMonthIndex(idx) }
+                                .testTag("beranda_health_month_label_$idx")
+                        ) {
+                            Text(
+                                text = pt.shortLabel,
+                                fontSize = if (points.size <= 6) 10.sp else 8.5.sp,
+                                fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Medium,
+                                color = if (isActive) Color(0xFF0F172A) else if (pt.hasData) Color(0xFF64748B) else Color(0xFFCBD5E1),
+                                textAlign = TextAlign.Center,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HealthMetricSummaryHeader(
     label: String,
-    valueText: String,
-    dotColor: Color,
-    isSelected: Boolean,
+    pctText: String,
+    osText: String,
+    debCount: Int,
+    deltaPct: Double?,
+    accentColor: Color,
     isFocused: Boolean,
+    isExplicitlySelected: Boolean,
+    formatter: NumberFormat,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(10.dp),
-        color = when {
-            isFocused -> Color.White.copy(alpha = 0.24f)
-            isSelected -> Color.White.copy(alpha = 0.14f)
-            else -> Color.White.copy(alpha = 0.06f)
-        },
-        border = if (isFocused) BorderStroke(1.dp, dotColor) else BorderStroke(0.6.dp, Color.White.copy(alpha = 0.18f))
+        shape = RoundedCornerShape(14.dp),
+        color = if (isExplicitlySelected) accentColor.copy(alpha = 0.08f) else Color(0xFFF8FAFC),
+        border = BorderStroke(
+            width = if (isExplicitlySelected) 1.5.dp else 1.dp,
+            color = if (isExplicitlySelected) accentColor.copy(alpha = 0.65f) else Color(0xFFE2E8F0)
+        )
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(7.dp)
-                        .background(dotColor, CircleShape)
-                )
-                Text(
-                    text = label,
-                    fontSize = 9.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White.copy(alpha = if (isSelected) 0.94f else 0.65f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                color = accentColor.copy(alpha = if (isFocused) 1f else 0.35f),
+                                shape = CircleShape
+                            )
+                    )
+                    Text(
+                        text = label,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isFocused) Color(0xFF0F172A) else Color(0xFF94A3B8)
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "Debitur",
+                        tint = accentColor.copy(alpha = if (isFocused) 0.9f else 0.4f),
+                        modifier = Modifier.size(11.dp)
+                    )
+                    Text(
+                        text = formatter.format(debCount),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF334155),
+                        maxLines = 1
+                    )
+                }
             }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = pctText,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = accentColor.copy(alpha = if (isFocused) 1f else 0.45f),
+                    maxLines = 1
+                )
+
+                if (deltaPct != null && abs(deltaPct) >= 0.05) {
+                    val isDown = deltaPct < 0.0
+                    val deltaColor = if (isDown) Color(0xFF059669) else Color(0xFFE11D48)
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = deltaColor.copy(alpha = 0.12f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isDown) {
+                                    Icons.AutoMirrored.Filled.TrendingDown
+                                } else {
+                                    Icons.AutoMirrored.Filled.TrendingUp
+                                },
+                                contentDescription = if (isDown) "Turun" else "Naik",
+                                tint = deltaColor,
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Text(
+                                text = "${if (deltaPct > 0) "+" else ""}${String.format(Locale.US, "%.1f", deltaPct)}%",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = deltaColor,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+
             Text(
-                text = valueText,
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = Color.White.copy(alpha = if (isSelected) 1f else 0.65f),
+                text = osText,
+                fontSize = adaptiveOsFontSize(osText, maxSp = 10.5f),
+                letterSpacing = (-0.25).sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF334155),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1651,135 +3305,126 @@ private fun PortfolioSeriesChip(
 }
 
 @Composable
-private fun BerandaDonutSummaryCard(
+private fun BerandaAlertMiniCard(
     title: String,
-    countText: String,
-    percentage: Double,
+    osText: String,
+    debText: String,
     accentColor: Color,
-    trackColor: Color,
     containerColor: Color,
     borderColor: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val animatedSweep by animateFloatAsState(
-        targetValue = ((percentage / 100.0) * 360.0).toFloat().coerceIn(0f, 360f),
-        animationSpec = tween(durationMillis = 550),
-        label = "donut_sweep_$title"
-    )
-
     Surface(
         modifier = modifier
-            .heightIn(min = 84.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .heightIn(min = 66.dp)
+            .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = containerColor,
         border = BorderStroke(1.dp, borderColor)
     ) {
-        Row(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .fillMaxSize()
+                .padding(horizontal = 7.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
             ) {
                 Text(
                     text = title,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF475569),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = countText,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0F172A),
-                    maxLines = 1
-                )
-                Text(
-                    text = "${String.format(Locale.US, "%.1f", percentage)}%",
-                    fontSize = 12.5.sp,
+                    fontSize = 9.sp,
+                    lineHeight = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = accentColor,
-                    maxLines = 1
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 2.dp)
                 )
-            }
-
-            Canvas(modifier = Modifier.size(46.dp)) {
-                val strokeW = 7.dp.toPx()
-                val arcSize = Size(size.width - strokeW, size.height - strokeW)
-                val topLeft = Offset(strokeW * 0.5f, strokeW * 0.5f)
-                drawArc(
-                    color = trackColor,
-                    startAngle = 0f,
-                    sweepAngle = 360f,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    style = Stroke(width = strokeW, cap = StrokeCap.Round)
-                )
-                if (animatedSweep > 0f) {
-                    drawArc(
-                        color = accentColor,
-                        startAngle = -90f,
-                        sweepAngle = animatedSweep,
-                        useCenter = false,
-                        topLeft = topLeft,
-                        size = arcSize,
-                        style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(1.5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "Debitur",
+                        tint = accentColor,
+                        modifier = Modifier.size(10.5.dp)
+                    )
+                    Text(
+                        text = debText,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF334155),
+                        maxLines = 1
                     )
                 }
             }
+            Text(
+                text = osText,
+                fontSize = adaptiveOsFontSize(osText, maxSp = 10f),
+                letterSpacing = (-0.3).sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color(0xFF0F172A),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
 
-private fun formatBerandaMillion(value: Double): String {
-    if (value <= 0.0) return "0"
-    val symbols = DecimalFormatSymbols(Locale("id", "ID")).apply {
-        groupingSeparator = '.'
-        decimalSeparator = ','
-    }
-    return when {
-        value >= 1_000_000.0 -> {
-            val millions = value / 1_000_000.0
-            val df = if (millions >= 100.0) {
-                DecimalFormat("#,##0", symbols)
-            } else {
-                DecimalFormat("#,##0.#", symbols)
-            }
-            "${df.format(millions)} Jt"
-        }
-        else -> {
-            val df = DecimalFormat("#,##0", symbols)
-            df.format(value)
-        }
-    }
+private fun normalizeBerandaCif(rawCif: String): String {
+    var str = rawCif.trim().uppercase()
+    if (str.startsWith("CIF")) str = str.substring(3).trim()
+    if (str.startsWith("-")) str = str.substring(1).trim()
+    return str.filter { it.isLetterOrDigit() }.dropWhile { it == '0' }
 }
 
-private fun formatCompactIdr(value: Double): String {
+private fun resolveBerandaDailyCustomer(
+    cust: CustomerEntity,
+    dailyMap: Map<String, CustomerEntity>
+): CustomerEntity? {
+    if (dailyMap.isEmpty()) return null
+    val rawRek = cust.noRekening.trim()
+    val cleanRek = rawRek.filter { it.isDigit() }
+    val noZeroRek = cleanRek.trimStart('0')
+    val formatted15 = com.example.data.network.SpreadsheetService.formatRekening15(rawRek)
+    return dailyMap[rawRek]
+        ?: (if (cleanRek.isNotBlank()) dailyMap[cleanRek] else null)
+        ?: (if (noZeroRek.isNotBlank()) dailyMap[noZeroRek] else null)
+        ?: (if (formatted15.isNotBlank()) dailyMap[formatted15] else null)
+}
+
+private fun isNonLancarBerandaKolek(kolek: String): Boolean {
+    val k = kolek.trim().uppercase()
+    return k.startsWith("SML") || k.contains("DPK") || k == "2" ||
+        k == "KL" || k.contains("KURANG") || k == "D" || k.contains("DIRAGUKAN") ||
+        k == "M" || k.contains("MACET") || k == "3" || k == "4" || k == "5" || k == "NPL"
+}
+
+private fun formatFullIdr(value: Double, formatter: NumberFormat): String {
     if (value <= 0.0) return "Rp 0"
-    val symbols = DecimalFormatSymbols(Locale("id", "ID")).apply {
-        groupingSeparator = '.'
-        decimalSeparator = ','
-    }
+    return "Rp ${formatDoubleClean(value, formatter)}"
+}
+
+private fun formatSignedFullIdr(value: Double, formatter: NumberFormat): String {
+    if (abs(value) < 0.5) return "Rp 0"
+    val formatted = formatDoubleClean(abs(value), formatter)
+    return if (value < 0.0) "-Rp $formatted" else "Rp $formatted"
+}
+
+private fun adaptiveOsFontSize(text: String, maxSp: Float = 10f): TextUnit {
     return when {
-        value >= 1_000_000_000.0 -> {
-            val m = value / 1_000_000_000.0
-            "Rp ${DecimalFormat("#,##0.##", symbols).format(m)} M"
-        }
-        value >= 1_000_000.0 -> {
-            val jt = value / 1_000_000.0
-            "Rp ${DecimalFormat("#,##0.#", symbols).format(jt)} Jt"
-        }
-        else -> "Rp ${DecimalFormat("#,##0", symbols).format(value)}"
+        text.length >= 18 -> (maxSp - 1.7f).coerceAtLeast(8.2f).sp
+        text.length >= 15 -> (maxSp - 1.1f).coerceAtLeast(8.8f).sp
+        text.length >= 12 -> (maxSp - 0.5f).coerceAtLeast(9.2f).sp
+        else -> maxSp.sp
     }
 }
 

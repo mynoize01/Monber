@@ -5,9 +5,12 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import kotlinx.coroutines.delay
@@ -38,6 +41,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -492,6 +496,7 @@ fun DashboardScreen(
     val filterSetorPokok by viewModel.filterSetorPokok.collectAsState()
     val filterTusim by viewModel.filterTusim.collectAsState()
     val filterTucil by viewModel.filterTucil.collectAsState()
+    val filterTunggakanKurang6Bln by viewModel.filterTunggakanKurang6Bln.collectAsState()
     val filterDesa by viewModel.filterDesa.collectAsState()
     val availableNpds by viewModel.availableNpds.collectAsState()
     val customersList by viewModel.customersList.collectAsState()
@@ -630,7 +635,6 @@ fun DashboardScreen(
     ) {
         viewModel.setBottomNav("BERANDA")
     }
-    var navSwitchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
     val appUpdateState by viewModel.appUpdateState.collectAsState()
@@ -689,9 +693,10 @@ fun DashboardScreen(
     }
 
     // Indon Locale for Number Format
-    val indoLocale = Locale("in", "ID")
-    val formatter = NumberFormat.getNumberInstance(indoLocale).apply {
-        maximumFractionDigits = 0
+    val formatter = remember {
+        NumberFormat.getNumberInstance(Locale("in", "ID")).apply {
+            maximumFractionDigits = 0
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -714,31 +719,15 @@ fun DashboardScreen(
                     onSelect = { targetNav ->
                         if (visualBottomNav == targetNav && selectedBottomNav == targetNav) return@CurvedAnimatedBottomBar
                         visualBottomNav = targetNav
-                        navSwitchJob?.cancel()
-                        navSwitchJob = coroutineScope.launch {
-                            kotlinx.coroutines.delay(85L)
-                            viewModel.setBottomNav(targetNav)
-                        }
+                        viewModel.setBottomNav(targetNav)
                     }
                 )
             }
         ) { innerPadding ->
         val isBerandaScreen = selectedBottomNav == "BERANDA"
         val isSettingScreen = selectedBottomNav == "SETTING"
-        val isFullBleedHero = isBerandaScreen || isSettingScreen
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = innerPadding.calculateBottomPadding())
-                .background(MaterialTheme.colorScheme.background)
-        ) {
-            androidx.compose.animation.AnimatedVisibility(
-                visible = !isFullBleedHero,
-                enter = fadeIn(tween(220, easing = FastOutSlowInEasing)) +
-                    expandVertically(expandFrom = Alignment.Top, animationSpec = tween(240, easing = FastOutSlowInEasing)),
-                exit = fadeOut(tween(150)) +
-                    shrinkVertically(shrinkTowards = Alignment.Top, animationSpec = tween(200, easing = FastOutSlowInEasing))
-            ) {
+        val saveableStateHolder = rememberSaveableStateHolder()
+        val renderNonFullBleedHeader: @Composable () -> Unit = {
             Column(modifier = Modifier.fillMaxWidth()) {
             // Unstretched normal Setting wave background clipped cleanly at the header bottom border
             val statusBarTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -764,10 +753,14 @@ fun DashboardScreen(
                     AnimatedContent(
                         targetState = showGlobalSearchPopup,
                         transitionSpec = {
-                            (fadeIn(animationSpec = tween(200)) + scaleIn(
-                                initialScale = 0.96f,
-                                animationSpec = tween(220)
-                            )) togetherWith fadeOut(animationSpec = tween(150))
+                            val headerSpring = spring<IntOffset>(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMedium,
+                                visibilityThreshold = IntOffset.VisibilityThreshold
+                            )
+                            slideInHorizontally(animationSpec = headerSpring) { it / 3 } togetherWith
+                                slideOutHorizontally(animationSpec = headerSpring) { it / 3 } using
+                                SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> snap() })
                         },
                         label = "header_search_transition"
                     ) { isSearchExpanded ->
@@ -836,7 +829,15 @@ fun DashboardScreen(
             // Automatic In-App Update Notification Banner if available and dialog was dismissed
             val availableUpdateRelease = (appUpdateState as? AppUpdateState.UpdateAvailable)?.release
             androidx.compose.animation.AnimatedVisibility(
-                visible = availableUpdateRelease != null && !showUpdateDialog
+                visible = availableUpdateRelease != null && !showUpdateDialog,
+                enter = expandVertically(
+                    expandFrom = Alignment.Top,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                ),
+                exit = shrinkVertically(
+                    shrinkTowards = Alignment.Top,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
             ) {
                 availableUpdateRelease?.let { release ->
                     Surface(
@@ -881,7 +882,15 @@ fun DashboardScreen(
 
             // Room Offline Cache Indicator Banner (shown across Dashboard & Data views when offline)
             androidx.compose.animation.AnimatedVisibility(
-                visible = isShowingCachedOfflineData && errorMessage == null
+                visible = isShowingCachedOfflineData && errorMessage == null,
+                enter = expandVertically(
+                    expandFrom = Alignment.Top,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                ),
+                exit = shrinkVertically(
+                    shrinkTowards = Alignment.Top,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
             ) {
                 val syncTimeLabel = remember(lastSyncMetadata) {
                     val ts = lastSyncMetadata?.lastSyncedAt ?: 0L
@@ -939,10 +948,16 @@ fun DashboardScreen(
                     }
                 }
             }
-            }
-            }
+        }
+        }
 
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = innerPadding.calculateBottomPadding())
+                    .background(MaterialTheme.colorScheme.background)
+                    .clipToBounds()
+            ) {
                 fun navOrderIndex(nav: String): Int = when (nav) {
                     "BERANDA" -> 0
                     "RENCANA" -> 1
@@ -952,71 +967,167 @@ fun DashboardScreen(
                     "SETTING" -> 5
                     else -> 2
                 }
+                val sharedHeaderNavs = remember { setOf("RENCANA", "KELOLAAN", "MONITORING", "DASHBOARD") }
+                fun shellModeFor(nav: String): String = when (nav) {
+                    "BERANDA" -> "BERANDA"
+                    "SETTING" -> "SETTING"
+                    else -> "SHARED_HEADER"
+                }
+                fun shellOrderIndex(mode: String): Int = when (mode) {
+                    "BERANDA" -> 0
+                    "SHARED_HEADER" -> 2
+                    "SETTING" -> 5
+                    else -> 2
+                }
+                val activeSharedNavState = remember {
+                    mutableStateOf(if (selectedBottomNav in sharedHeaderNavs) selectedBottomNav else "KELOLAAN")
+                }
+                if (selectedBottomNav in sharedHeaderNavs) {
+                    activeSharedNavState.value = selectedBottomNav
+                }
+                val currentShellMode = shellModeFor(selectedBottomNav)
+
                 AnimatedContent(
-                    targetState = selectedBottomNav,
+                    targetState = currentShellMode,
                     transitionSpec = {
-                        val isForward = navOrderIndex(targetState) >= navOrderIndex(initialState)
-                        (slideInHorizontally(
-                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
-                            initialOffsetX = { fullWidth ->
-                                val dist = (fullWidth * 0.16f).roundToInt()
-                                if (isForward) dist else -dist
-                            }
-                        ) + fadeIn(
-                            animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)
-                        ) + scaleIn(
-                            initialScale = 0.985f,
-                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
-                        )) togetherWith (slideOutHorizontally(
-                            animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
-                            targetOffsetX = { fullWidth ->
-                                val dist = (fullWidth * 0.12f).roundToInt()
-                                if (isForward) -dist else dist
-                            }
-                        ) + fadeOut(
-                            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
-                        ) + scaleOut(
-                            targetScale = 0.985f,
-                            animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)
-                        )) using SizeTransform(clip = true)
+                        val isForward = shellOrderIndex(targetState) >= shellOrderIndex(initialState)
+                        val slideSpring = spring<IntOffset>(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow,
+                            visibilityThreshold = IntOffset.VisibilityThreshold
+                        )
+                        slideInHorizontally(
+                            animationSpec = slideSpring,
+                            initialOffsetX = { fullWidth -> if (isForward) fullWidth else -fullWidth }
+                        ) togetherWith slideOutHorizontally(
+                            animationSpec = slideSpring,
+                            targetOffsetX = { fullWidth -> if (isForward) -fullWidth else fullWidth }
+                        ) using SizeTransform(
+                            clip = true,
+                            sizeAnimationSpec = { _, _ -> snap() }
+                        )
                     },
-                    label = "main_nav_transition"
-                ) { currentNav ->
-                Column(modifier = Modifier.fillMaxSize()) {
-                    when (currentNav) {
+                    label = "main_shell_transition"
+                ) { shellMode ->
+                    when (shellMode) {
                         "BERANDA" -> {
-                            BerandaScreenView(
-                                viewModel = viewModel,
-                                formatter = formatter,
-                                onOpenGlobalSearch = {
-                                    globalSearchQuery = ""
-                                    showGlobalSearchPopup = true
-                                },
-                                onOpenKelolaan = { viewModel.setBottomNav("KELOLAAN") },
-                                onOpenKunjungan = { viewModel.setBottomNav("RENCANA") },
-                                onOpenMonitoring = { viewModel.setBottomNav("MONITORING") },
-                                onOpenDashboard = { viewModel.setBottomNav("DASHBOARD") },
-                                onOpenLogin = { showLoginDialog = true },
-                                onOpenUpdateDialog = { viewModel.openUpdateDialog() },
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                        "DASHBOARD" -> {
-                            DashboardUnitView(
-                                viewModel = viewModel,
-                                formatter = formatter,
-                                onCustomerClick = { showDetailDialogForCustomer = it },
-                                modifier = Modifier.fillMaxSize()
-                            )
+                            saveableStateHolder.SaveableStateProvider("BERANDA") {
+                                BerandaScreenView(
+                                    viewModel = viewModel,
+                                    formatter = formatter,
+                                    onOpenGlobalSearch = {
+                                        globalSearchQuery = ""
+                                        showGlobalSearchPopup = true
+                                    },
+                                    onOpenKelolaan = { viewModel.setBottomNav("KELOLAAN") },
+                                    onOpenKunjungan = { viewModel.setBottomNav("RENCANA") },
+                                    onOpenMonitoring = { viewModel.setBottomNav("MONITORING") },
+                                    onOpenDashboard = { viewModel.setBottomNav("DASHBOARD") },
+                                    onOpenLogin = { showLoginDialog = true },
+                                    onOpenUpdateDialog = { viewModel.openUpdateDialog() },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
                         }
                         "SETTING" -> {
-                            SettingsScreenView(
-                                viewModel = viewModel,
-                                onOpenAnalytics = { showDetailUnitDialog = true },
-                                modifier = Modifier.fillMaxSize()
-                            )
+                            saveableStateHolder.SaveableStateProvider("SETTING") {
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    SettingsScreenView(
+                                        viewModel = viewModel,
+                                        onOpenAnalytics = { showDetailUnitDialog = true },
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .align(Alignment.TopCenter)
+                                            .statusBarsPadding()
+                                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                                            .zIndex(20f)
+                                    ) {
+                                        AnimatedContent(
+                                            targetState = showGlobalSearchPopup,
+                                            transitionSpec = {
+                                                val searchSpring = spring<IntOffset>(
+                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                    stiffness = Spring.StiffnessMedium,
+                                                    visibilityThreshold = IntOffset.VisibilityThreshold
+                                                )
+                                                slideInHorizontally(animationSpec = searchSpring) { it / 3 } togetherWith
+                                                    slideOutHorizontally(animationSpec = searchSpring) { it / 3 } using
+                                                    SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> snap() })
+                                            },
+                                            label = "setting_header_search_transition"
+                                        ) { isSearchExpanded ->
+                                            if (isSearchExpanded) {
+                                                HeaderPocketSearchBar(
+                                                    query = globalSearchQuery,
+                                                    onQueryChange = { globalSearchQuery = it },
+                                                    onClose = {
+                                                        showGlobalSearchPopup = false
+                                                        globalSearchQuery = ""
+                                                        keyboardController?.hide()
+                                                    },
+                                                    focusRequester = globalSearchFocusRequester,
+                                                    modifier = Modifier.padding(vertical = 6.dp)
+                                                )
+                                            } else {
+                                                Box(modifier = Modifier.fillMaxWidth()) {
+                                                    HeaderPocketSearchButton(
+                                                        onClick = { showGlobalSearchPopup = true },
+                                                        modifier = Modifier.align(Alignment.TopEnd)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
-                else -> {
+                        else -> {
+                            // Shared static header for KELOLAAN, MONITORING, DASHBOARD, and RENCANA;
+                            // only the content below the header slides/transitions.
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                renderNonFullBleedHeader()
+
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f)
+                                        .clipToBounds()
+                                ) {
+                                    AnimatedContent(
+                                        targetState = activeSharedNavState.value,
+                                        transitionSpec = {
+                                            val isForward = navOrderIndex(targetState) >= navOrderIndex(initialState)
+                                            val bodySlideSpring = spring<IntOffset>(
+                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                stiffness = Spring.StiffnessMediumLow,
+                                                visibilityThreshold = IntOffset.VisibilityThreshold
+                                            )
+                                            slideInHorizontally(
+                                                animationSpec = bodySlideSpring,
+                                                initialOffsetX = { fullWidth -> if (isForward) fullWidth else -fullWidth }
+                                            ) togetherWith slideOutHorizontally(
+                                                animationSpec = bodySlideSpring,
+                                                targetOffsetX = { fullWidth -> if (isForward) -fullWidth else fullWidth }
+                                            ) using SizeTransform(
+                                                clip = true,
+                                                sizeAnimationSpec = { _, _ -> snap() }
+                                            )
+                                        },
+                                        label = "shared_header_body_transition"
+                                    ) { currentNav ->
+                                        saveableStateHolder.SaveableStateProvider(currentNav) {
+                                            Column(modifier = Modifier.fillMaxSize()) {
+                                                if (currentNav == "DASHBOARD") {
+                                                    DashboardUnitView(
+                                                        viewModel = viewModel,
+                                                        formatter = formatter,
+                                                        onCustomerClick = { showDetailDialogForCustomer = it },
+                                                        modifier = Modifier.fillMaxSize()
+                                                    )
+                                                } else {
                     if (currentNav == "MONITORING") {
                         TabsHeader(
                             selectedMenu = selectedMenu,
@@ -1245,9 +1356,19 @@ fun DashboardScreen(
                                     key(custKey) {
                                         AnimatedVisibility(
                                             visible = !isExiting,
-                                            exit = fadeOut(animationSpec = tween(220)) +
-                                                slideOutHorizontally(animationSpec = tween(260)) { fullWidth -> fullWidth / 3 } +
-                                                shrinkVertically(animationSpec = tween(260))
+                                            exit = slideOutHorizontally(
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow,
+                                                    visibilityThreshold = IntOffset.VisibilityThreshold
+                                                )
+                                            ) { fullWidth -> fullWidth / 2 } +
+                                                shrinkVertically(
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                                        stiffness = Spring.StiffnessMediumLow
+                                                    )
+                                                )
                                         ) {
                                             Column(modifier = Modifier.fillMaxWidth()) {
                                                 Row(
@@ -1335,7 +1456,17 @@ fun DashboardScreen(
                 }
 
                 // Expanded filter options panel
-                AnimatedVisibility(visible = showFilterPanel && selectedMenu != "SIMPANAN") {
+                AnimatedVisibility(
+                    visible = showFilterPanel && selectedMenu != "SIMPANAN",
+                    enter = expandVertically(
+                        expandFrom = Alignment.Top,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                    ),
+                    exit = shrinkVertically(
+                        shrinkTowards = Alignment.Top,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                    )
+                ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1378,7 +1509,8 @@ fun DashboardScreen(
                                 filterAlamat.isNotBlank() ||
                                 filterSetorPokok ||
                                 filterTusim ||
-                                filterTucil
+                                filterTucil ||
+                                filterTunggakanKurang6Bln
  
                         // 1. Filter Mantri OR 3 Toggle Switches + Desa (If Kelolaan Menu)
                         if (selectedMenu == "KELOLAAN") {
@@ -1884,6 +2016,7 @@ fun DashboardScreen(
                                     viewModel.filterSetorPokok.value = false
                                     viewModel.filterTusim.value = false
                                     viewModel.filterTucil.value = false
+                                    viewModel.filterTunggakanKurang6Bln.value = false
                                     viewModel.filterDesa.value = "SEMUA"
                                 },
                                 colors = ButtonDefaults.buttonColors(
@@ -1923,11 +2056,12 @@ fun DashboardScreen(
                     filterAlamat.isNotEmpty() ||
                     filterSetorPokok ||
                     filterTusim ||
-                    filterTucil)
+                    filterTucil ||
+                    filterTunggakanKurang6Bln)
 
             if (hasActiveFilters && !showFilterPanel) {
                 Text(
-                    text = "Reset Semua Filter",
+                    text = if (filterTunggakanKurang6Bln) "Reset Semua Filter (Tunggakan <6 Bln)" else "Reset Semua Filter",
                     style = MaterialTheme.typography.labelMedium,
                     color = Color(0xFFD32F2F),
                     fontWeight = FontWeight.Bold,
@@ -1951,6 +2085,7 @@ fun DashboardScreen(
                             viewModel.filterSetorPokok.value = false
                             viewModel.filterTusim.value = false
                             viewModel.filterTucil.value = false
+                            viewModel.filterTunggakanKurang6Bln.value = false
                         }
                 )
             }
@@ -2055,57 +2190,31 @@ fun DashboardScreen(
                 }
             }
         }
-    }
-}
-                }
-
-    if (isSettingScreen) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 4.dp)
-                .zIndex(20f)
-        ) {
-            AnimatedContent(
-                targetState = showGlobalSearchPopup,
-                transitionSpec = {
-                    (fadeIn(animationSpec = tween(200)) + scaleIn(
-                        initialScale = 0.96f,
-                        animationSpec = tween(220)
-                    )) togetherWith fadeOut(animationSpec = tween(150))
-                },
-                label = "setting_header_search_transition"
-            ) { isSearchExpanded ->
-                if (isSearchExpanded) {
-                    HeaderPocketSearchBar(
-                        query = globalSearchQuery,
-                        onQueryChange = { globalSearchQuery = it },
-                        onClose = {
-                            showGlobalSearchPopup = false
-                            globalSearchQuery = ""
-                            keyboardController?.hide()
-                        },
-                        focusRequester = globalSearchFocusRequester,
-                        modifier = Modifier.padding(vertical = 6.dp)
-                    )
-                } else {
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        HeaderPocketSearchButton(
-                            onClick = { showGlobalSearchPopup = true },
-                            modifier = Modifier.align(Alignment.TopEnd)
-                        )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
-        }
-    }
 
     androidx.compose.animation.AnimatedVisibility(
         visible = showGlobalSearchPopup,
-        enter = fadeIn(tween(180)) + expandVertically(expandFrom = Alignment.Top, animationSpec = tween(220)),
-        exit = fadeOut(tween(140)) + shrinkVertically(shrinkTowards = Alignment.Top, animationSpec = tween(180)),
+        enter = slideInVertically(
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow,
+                visibilityThreshold = IntOffset.VisibilityThreshold
+            )
+        ) { -it / 5 },
+        exit = slideOutVertically(
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMedium,
+                visibilityThreshold = IntOffset.VisibilityThreshold
+            )
+        ) { -it / 5 },
         modifier = Modifier
             .align(Alignment.TopCenter)
             .zIndex(99f)
@@ -2210,7 +2319,6 @@ fun DashboardScreen(
     }
 }
     }
-}
 
     if (showSimpananFilterBottomSheet) {
         ModalBottomSheet(

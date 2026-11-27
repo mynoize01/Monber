@@ -6,19 +6,29 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.data.model.CachedSummaryEntity
 import com.example.data.model.CustomerEntity
 import com.example.data.model.Di319Entity
+import com.example.data.model.MonthlyHistoryEntity
 import com.example.data.model.SyncMetadataEntity
 
 @Database(
-    entities = [CustomerEntity::class, Di319Entity::class, SyncMetadataEntity::class],
-    version = 11,
+    entities = [
+        CustomerEntity::class,
+        Di319Entity::class,
+        SyncMetadataEntity::class,
+        CachedSummaryEntity::class,
+        MonthlyHistoryEntity::class
+    ],
+    version = 12,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun customerDao(): CustomerDao
     abstract fun di319Dao(): Di319Dao
     abstract fun syncMetadataDao(): SyncMetadataDao
+    abstract fun cachedSummaryDao(): CachedSummaryDao
+    abstract fun monthlyHistoryDao(): MonthlyHistoryDao
 
     companion object {
         @Volatile
@@ -44,6 +54,23 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `cached_summaries` (`cacheKey` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`cacheKey`))"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `monthly_history` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `month` INTEGER NOT NULL, `accountKey` TEXT NOT NULL, `kolek` TEXT NOT NULL, `tunggakan` REAL)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_monthly_history_month_accountKey` ON `monthly_history` (`month`, `accountKey`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_monthly_history_accountKey` ON `monthly_history` (`accountKey`)"
+                )
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -51,7 +78,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "customer_database"
                 )
-                    .addMigrations(MIGRATION_9_10, MIGRATION_10_11)
+                    .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
