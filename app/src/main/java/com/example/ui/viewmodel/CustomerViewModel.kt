@@ -3491,9 +3491,6 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         if (eUrl2.value.isBlank()) {
             saveLink("e_url_2", "https://docs.google.com/spreadsheets/d/1SWTIr_S9fAI7UKHsw26KovJnXXZzxEAE/edit?usp=drive_link&ouid=112982864281396524406&rtpof=true&sd=true")
         }
-        if (kUrl1.value.isBlank() || kUrl1.value.contains("drive_link")) {
-            saveLink("k_url_1", "https://docs.google.com/spreadsheets/d/1hEMC8jlu3M6GLpBTZQJVvgyRpBTcNK-6/edit?usp=drivesdk&ouid=112982864281396524406&rtpof=true&sd=true")
-        }
         if (di319Url.value.isBlank()) {
             saveLink("di319_url", "https://docs.google.com/spreadsheets/d/1MjEhFYv6SZc-8lY0q5ODNiSqmwtzZD3b/edit?usp=drive_link&ouid=112982864281396524406&rtpof=true&sd=true")
         }
@@ -3920,13 +3917,13 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                                         }
                                     }
                                 }
-                                else -> getOfflineFileContent("k_url_1")
+                                else -> getOfflineFileContent("url_4")
                             }
                         } else null
 
                         val offlinePreviousMonthContent = if (isOffline && fetchMenu == "INTRAKOMP") getOfflineFileContent("url_1") else null
                         val offlineLw321Content = if (isOffline && fetchMenu == "INTRAKOMP") getOfflineFileContent("url_4") else null
-                        val offlineKelolaanContent = if (isOffline && fetchMenu == "INTRAKOMP") getOfflineFileContent("k_url_1") else null
+                        val offlineKelolaanContent: String? = null
 
                         val targetUrl = if (!isOffline) {
                             when (fetchMenu) {
@@ -3962,7 +3959,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                         } else null
 
                         val lw321Url = if (!isOffline && fetchMenu == "INTRAKOMP") url4.value else null
-                        val kelolaanUrl = if (!isOffline && fetchMenu == "INTRAKOMP") kUrl1.value else null
+                        val kelolaanUrl: String? = null
 
                         val hasInput = if (isOffline) !offlineTargetContent.isNullOrBlank() else !targetUrl.isNullOrBlank()
                         if (hasInput) {

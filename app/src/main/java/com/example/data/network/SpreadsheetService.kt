@@ -319,13 +319,13 @@ object SpreadsheetService {
                     }
                     
                     val alamatVal = if (alamatIdx != -1 && cols.size > alamatIdx) cols[alamatIdx].trim() else ""
-                    val noHp1Val = if (cols.size > 5) cols[5].trim() else ""
-                    val noHp2Val = if (cols.size > 6) cols[6].trim() else ""
+                    val noHp1Val = if (!isRekKey && cols.size > 4) cols[4].trim() else ""
+                    val noHp2Val = if (!isRekKey && cols.size > 5) cols[5].trim() else ""
                     val targetDesaIdx = if (desaIdx != -1) desaIdx else 3
                     val desaVal = if (cols.size > targetDesaIdx) cols[targetDesaIdx].trim() else ""
                     
-                    val noHp1Clean = if (noHp1Val.isBlank() || noHp1Val == "0" || noHp1Val.uppercase() == "#N/A" || noHp1Val.uppercase() == "N/A") "" else noHp1Val
-                    val noHp2Clean = if (noHp2Val.isBlank() || noHp2Val == "0" || noHp2Val.uppercase() == "#N/A" || noHp2Val.uppercase() == "N/A") "" else noHp2Val
+                    val noHp1Clean = if (noHp1Val.isBlank() || noHp1Val == "0" || noHp1Val == "-" || noHp1Val.equals("#N/A", ignoreCase = true) || noHp1Val.equals("N/A", ignoreCase = true)) "" else noHp1Val
+                    val noHp2Clean = if (noHp2Val.isBlank() || noHp2Val == "0" || noHp2Val == "-" || noHp2Val.equals("#N/A", ignoreCase = true) || noHp2Val.equals("N/A", ignoreCase = true)) "" else noHp2Val
                     
                     if (cifVal.isNotBlank() && cifVal != "CIF" && cifVal != "NO CIF" && cifVal != "NOMOR CIF") {
                         val key = if (isRekKey) getNormalizedRekKey(cifVal) else getNormalizedCifKey(cifVal)
@@ -336,7 +336,17 @@ object SpreadsheetService {
                                 noHp2 = noHp2Clean,
                                 desa = desaVal
                             )
-                            mapping[key] = info
+                            val existing = mapping[key]
+                            mapping[key] = if (existing == null) {
+                                info
+                            } else {
+                                KelolaanInfo(
+                                    alamat = info.alamat.ifBlank { existing.alamat },
+                                    noHp1 = info.noHp1.ifBlank { existing.noHp1 },
+                                    noHp2 = info.noHp2.ifBlank { existing.noHp2 },
+                                    desa = info.desa.ifBlank { existing.desa }
+                                )
+                            }
                         }
                     }
                 }
@@ -1612,7 +1622,7 @@ object SpreadsheetService {
                 }
             }
 
-            // Look up No HP 1 and No HP 2 from kelolaanMap (Database Kelolaan) match on CIF
+            // Look up Desa, No HP 1 (Col E), and No HP 2 (Col F) from lw321Map (Database LW321) match on CIF
             val parts = mutableListOf<String>()
             parts.add("NPD_FULL::${nextPmtDateStr.trim()}")
             if (menuType == "EKSTRAKOMP") {
@@ -1622,8 +1632,16 @@ object SpreadsheetService {
                     parts.add("Tgl PH::$tglPhValue")
                 }
             }
-            if (matchedAddressInfo != null && matchedAddressInfo.desa.isNotBlank()) {
-                parts.add("Desa::${matchedAddressInfo.desa}")
+            if (matchedAddressInfo != null) {
+                if (matchedAddressInfo.desa.isNotBlank()) {
+                    parts.add("Desa::${matchedAddressInfo.desa}")
+                }
+                if (matchedAddressInfo.noHp1.isNotBlank()) {
+                    parts.add("No HP 1::${matchedAddressInfo.noHp1}")
+                }
+                if (matchedAddressInfo.noHp2.isNotBlank()) {
+                    parts.add("No HP 2::${matchedAddressInfo.noHp2}")
+                }
             }
             if (kelolaanMap.isNotEmpty()) {
                 var matchedHpInfo: KelolaanInfo? = null
@@ -1637,10 +1655,10 @@ object SpreadsheetService {
                 }
 
                 if (matchedHpInfo != null) {
-                    if (matchedHpInfo.noHp1.isNotBlank()) {
+                    if (matchedHpInfo.noHp1.isNotBlank() && parts.none { it.startsWith("No HP 1::") }) {
                         parts.add("No HP 1::${matchedHpInfo.noHp1}")
                     }
-                    if (matchedHpInfo.noHp2.isNotBlank()) {
+                    if (matchedHpInfo.noHp2.isNotBlank() && parts.none { it.startsWith("No HP 2::") }) {
                         parts.add("No HP 2::${matchedHpInfo.noHp2}")
                     }
                     if (matchedHpInfo.desa.isNotBlank() && parts.none { it.startsWith("Desa::") }) {

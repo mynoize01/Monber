@@ -114,7 +114,6 @@ fun SettingsScreenView(
     val url2 by viewModel.url2.collectAsState()
     val url4 by viewModel.url4.collectAsState()
     val eUrl2 by viewModel.eUrl2.collectAsState()
-    val kUrl1 by viewModel.kUrl1.collectAsState()
 
     // Daily Links
     val url3 by viewModel.url3.collectAsState()
@@ -637,17 +636,6 @@ fun SettingsScreenView(
                                                 viewModel.saveLink("e_url_2", clip)
                                             },
                                             onClear = { viewModel.saveLink("e_url_2", "") }
-                                        )
-
-                                        LinkInputField(
-                                            label = "Database Kelolaan",
-                                            value = kUrl1,
-                                            onValueChange = { viewModel.saveLink("k_url_1", it) },
-                                            onPaste = {
-                                                val clip = clipboardManager.getText()?.text ?: ""
-                                                viewModel.saveLink("k_url_1", clip)
-                                            },
-                                            onClear = { viewModel.saveLink("k_url_1", "") }
                                         )
                                     }
 

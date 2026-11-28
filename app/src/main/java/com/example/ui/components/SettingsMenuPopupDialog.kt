@@ -139,7 +139,6 @@ fun SettingsMenuPopupDialog(
     val offlineNameUrl4 by viewModel.offlineNameUrl4.collectAsState()
     val offlineNameEUrl1 by viewModel.offlineNameEUrl1.collectAsState()
     val offlineNameEUrl2 by viewModel.offlineNameEUrl2.collectAsState()
-    val offlineNameKUrl1 by viewModel.offlineNameKUrl1.collectAsState()
     val offlineNameDi319Url by viewModel.offlineNameDi319Url.collectAsState()
     val offlineNameLw325Daily by viewModel.offlineNameLw325Daily.collectAsState()
 
@@ -281,7 +280,6 @@ fun SettingsMenuPopupDialog(
                                         "url_4" to offlineNameUrl4,
                                         "e_url_1" to offlineNameEUrl1,
                                         "e_url_2" to offlineNameEUrl2,
-                                        "k_url_1" to offlineNameKUrl1,
                                         "di319_url" to offlineNameDi319Url,
                                         "lw325_daily_url" to offlineNameLw325Daily
                                     ),
@@ -815,7 +813,6 @@ private fun AppPreferencesSubPage(
                                 "url_4" to "Database LW321",
                                 "e_url_1" to "LW325 Akhir Bulan",
                                 "e_url_2" to "Database LW325",
-                                "k_url_1" to "Database Kelolaan",
                                 "di319_url" to "DI319",
                                 "lw325_daily_url" to "LW325 Daily"
                             )

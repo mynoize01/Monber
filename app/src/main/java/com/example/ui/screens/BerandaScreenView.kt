@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -1162,7 +1163,7 @@ fun BerandaScreenView(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = statusBarTopPadding + 8.dp, bottom = 16.dp)
+                    .padding(top = statusBarTopPadding, bottom = 10.dp)
                     .padding(horizontal = 18.dp)
             ) {
                 // Top Brand & Action Icons Row
@@ -1171,17 +1172,17 @@ fun BerandaScreenView(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.Top
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Image(
                             painter = painterResource(id = R.drawable.logobaru1),
                             contentDescription = "Logo MONBER!",
-                            contentScale = ContentScale.Fit,
+                            contentScale = ContentScale.FillBounds,
                             modifier = Modifier
-                                .height(80.dp)
-                                .wrapContentWidth()
+                                .height(72.dp)
+                                .aspectRatio(80f / 64f, matchHeightConstraintsFirst = true)
                         )
                         Text(
-                            text = "By nUbiin__",
+                            text = "  By nUbiin__",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
                             color = Color.White.copy(alpha = 0.92f)
@@ -1243,7 +1244,7 @@ fun BerandaScreenView(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 // Greeting kept on the left so the right-side 3D people artwork in bg_beranda stays clear
                 Column(

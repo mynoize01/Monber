@@ -573,7 +573,6 @@ fun DashboardScreen(
     val url4 by viewModel.url4.collectAsState()
     val eUrl1 by viewModel.eUrl1.collectAsState()
     val eUrl2 by viewModel.eUrl2.collectAsState()
-    val kUrl1 by viewModel.kUrl1.collectAsState()
     val di319Url by viewModel.di319Url.collectAsState()
     
     val isOfflineModeEnabled by viewModel.isOfflineModeEnabled.collectAsState()
@@ -583,7 +582,6 @@ fun DashboardScreen(
     val offlineNameUrl4 by viewModel.offlineNameUrl4.collectAsState()
     val offlineNameEUrl1 by viewModel.offlineNameEUrl1.collectAsState()
     val offlineNameEUrl2 by viewModel.offlineNameEUrl2.collectAsState()
-    val offlineNameKUrl1 by viewModel.offlineNameKUrl1.collectAsState()
     val offlineNameDi319Url by viewModel.offlineNameDi319Url.collectAsState()
     val dailyDataMap by viewModel.dailyDataMap.collectAsState()
     val di319Rows by viewModel.di319Rows.collectAsState()
@@ -6780,7 +6778,6 @@ fun DashboardScreen(
                     Text("Link Database:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     UrlField("url_4", "Database LW321", url4) { viewModel.saveLink("url_4", it) }
                     UrlField("e_url_2", "Database LW325", eUrl2) { viewModel.saveLink("e_url_2", it) }
-                    UrlField("k_url_1", "Database Kelolaan", kUrl1) { viewModel.saveLink("k_url_1", it) }
                     UrlField("di319_url", "Di319", di319Url) { viewModel.saveLink("di319_url", it) }
                 }
             },
@@ -7060,7 +7057,6 @@ fun DashboardScreen(
                     Text("File Database:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     OfflineFileField("url_4", "Database LW321 (url_4)", offlineNameUrl4)
                     OfflineFileField("e_url_2", "Database LW325 (e_url_2)", offlineNameEUrl2)
-                    OfflineFileField("k_url_1", "Database Kelolaan (k_url_1)", offlineNameKUrl1)
                     OfflineFileField("di319_url", "Di319 (di319_url)", offlineNameDi319Url)
                 }
             },
