@@ -135,7 +135,7 @@ jobs:
           $GRADLE_CMD --version
           mkdir -p dist
 
-          GRADLE_CI_FLAGS="--init-script /tmp/ci-maven-mirror.init.gradle.kts --no-daemon --no-configuration-cache --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g --stacktrace"
+          GRADLE_CI_FLAGS="--init-script /tmp/ci-maven-mirror.init.gradle.kts --no-daemon --no-configuration-cache --no-build-cache --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g --stacktrace"
 
           decode_base64_to_file() {
             local b64_input="$1"

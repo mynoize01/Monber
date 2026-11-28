@@ -948,14 +948,40 @@ fun BerandaScreenView(
     Box(
         modifier = modifier.fillMaxSize()
     ) {
-        // Full-bleed custom wallpaper background (includes upper-right 3D people silhouettes & blue wave layers)
-        Image(
-            painter = painterResource(id = R.drawable.bg_beranda),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            alignment = Alignment.TopCenter,
-            modifier = Modifier.matchParentSize()
-        )
+        // Full-bleed custom wallpaper background (resolved safely with gradient fallback)
+        val bgResId = remember(context) {
+            context.resources.getIdentifier("bg_beranda", "drawable", context.packageName)
+        }
+        if (bgResId != 0) {
+            Image(
+                painter = painterResource(id = bgResId),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.TopCenter,
+                modifier = Modifier.matchParentSize()
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color(0xFFEDF3FC))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(320.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFF003B8E),
+                                    Color(0xFF005EC4),
+                                    Color(0xFF0F7EE6)
+                                )
+                            )
+                        )
+                )
+            }
+        }
 
         Column(
             modifier = Modifier.fillMaxSize()
