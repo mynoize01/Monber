@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CustomerEntity
 import com.example.data.model.desa
+import com.example.ui.components.AnimatedFadeSlideDialog
 import com.example.ui.viewmodel.CustomerViewModel
 import com.example.ui.viewmodel.MantriDetailData
 import com.example.ui.viewmodel.SortColumn
@@ -3125,12 +3126,7 @@ fun CustomerTablePopupDialog(
     val totalOs = remember(filteredCustomers) { filteredCustomers.sumOf { it.osPinjaman } }
     val totalDeb = filteredCustomers.size
 
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(
-            usePlatformDefaultWidth = false
-        )
-    ) {
+    AnimatedFadeSlideDialog(onDismiss = onDismiss) { requestDismiss ->
         Card(
             modifier = Modifier
                 .fillMaxWidth(0.96f)
@@ -3171,7 +3167,7 @@ fun CustomerTablePopupDialog(
                     }
 
                     IconButton(
-                        onClick = onDismiss,
+                        onClick = requestDismiss,
                         modifier = Modifier.size(28.dp)
                     ) {
                         Icon(

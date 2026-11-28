@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -13,6 +14,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CustomerEntity
 import com.example.data.model.desa
+import com.example.ui.components.LazyLoadingFooterRow
+import com.example.ui.components.rememberLazyPagedItems
 import com.example.ui.theme.BentoPrimary
 import java.text.NumberFormat
 
@@ -55,9 +59,22 @@ fun GlobalSearchPopup(
                 terms.all { t ->
                     name.contains(t) || rek.contains(t) || cif.contains(t) || mantri.contains(t)
                 }
-            }.take(30)
+            }
         }
     }
+    val searchListState = rememberLazyListState()
+    LaunchedEffect(trimmedQuery) {
+        if (searchListState.firstVisibleItemIndex > 0) {
+            searchListState.scrollToItem(0)
+        }
+    }
+    val pagedSearchResults = rememberLazyPagedItems(
+        items = searchResults,
+        listState = searchListState,
+        pageSize = 30,
+        prefetchDistance = 6,
+        resetKey = trimmedQuery
+    )
 
     Surface(
         modifier = modifier
@@ -192,20 +209,31 @@ fun GlobalSearchPopup(
                 }
             } else {
                 LazyColumn(
+                    state = searchListState,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 240.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    items(searchResults, key = { "${it.menuType}_${it.id}_${it.noRekening}" }) { customer ->
-                        GlobalSearchResultCard(
-                            customer = customer,
-                            formatter = formatter,
-                            onClick = {
-                                // Detail debitur dibuka, popup TIDAK menghilang
-                                onCustomerClick(customer)
-                            }
-                        )
+                    items(pagedSearchResults.visibleItems, key = { "${it.menuType}_${it.id}_${it.noRekening}" }) { customer ->
+                        Box(modifier = Modifier.animateItem()) {
+                            GlobalSearchResultCard(
+                                customer = customer,
+                                formatter = formatter,
+                                onClick = {
+                                    // Detail debitur dibuka, popup TIDAK menghilang
+                                    onCustomerClick(customer)
+                                }
+                            )
+                        }
+                    }
+                    if (pagedSearchResults.hasMore) {
+                        item(key = "global_search_lazy_footer") {
+                            LazyLoadingFooterRow(
+                                visibleCount = pagedSearchResults.visibleItems.size,
+                                totalCount = pagedSearchResults.totalCount
+                            )
+                        }
                     }
                 }
             }

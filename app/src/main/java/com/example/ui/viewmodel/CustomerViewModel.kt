@@ -59,21 +59,10 @@ data class MantriDetailData(
     val npl: UnitSummaryData = UnitSummaryData()
 )
 
-data class RealisasiCustomerItem(
-    val namaNasabah: String,
-    val noRekening: String,
-    val tglReal: String,
-    val realisasi: Double,
-    val netDisburs: Double,
-    val namaMantri: String,
-    val segmen: String
-)
-
 data class RealisasiNetMetrics(
     val realisasi: Double = 0.0,
     val netDisburs: Double = 0.0,
-    val debtors: Int = 0,
-    val customers: List<RealisasiCustomerItem> = emptyList()
+    val debtors: Int = 0
 )
 
 data class MonthlyRealisasiSnapshot(
@@ -1106,9 +1095,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                 var unitReal = 0.0
                 var unitNet = 0.0
                 var unitDeb = 0
-                val unitCustomerList = mutableListOf<RealisasiCustomerItem>()
                 val mantriAcc = mutableMapOf<String, Triple<Double, Double, Int>>()
-                val mantriCustomerLists = mutableMapOf<String, MutableList<RealisasiCustomerItem>>()
 
                 for (cust in realizedInMonth) {
                     val realAmt = cust.plafond
@@ -1126,17 +1113,6 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                         pName.isNotBlank() && pName != "Blank PN" && pName != "TANPA NAMA" -> pName
                         else -> "Blank PN"
                     }
-                    val item = RealisasiCustomerItem(
-                        namaNasabah = cust.namaNasabah.trim().ifBlank { "Tanpa Nama" },
-                        noRekening = cust.noRekening.trim(),
-                        tglReal = extractTglRealRaw(cust),
-                        realisasi = realAmt,
-                        netDisburs = netAmt,
-                        namaMantri = targetName,
-                        segmen = cust.segmen.trim()
-                    )
-                    unitCustomerList.add(item)
-                    mantriCustomerLists.getOrPut(targetName) { mutableListOf() }.add(item)
 
                     val old = mantriAcc[targetName]
                     mantriAcc[targetName] = if (old == null) {
@@ -1146,22 +1122,17 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
 
-                val itemComparator = compareByDescending<RealisasiCustomerItem> { it.realisasi }
-                    .thenBy { it.namaNasabah.lowercase() }
-
                 resultMap[yr * 100 + mo] = MonthlyRealisasiSnapshot(
                     unit = RealisasiNetMetrics(
                         realisasi = unitReal,
                         netDisburs = unitNet,
-                        debtors = unitDeb,
-                        customers = unitCustomerList.sortedWith(itemComparator)
+                        debtors = unitDeb
                     ),
-                    byMantri = mantriAcc.mapValues { (mantriKey, t) ->
+                    byMantri = mantriAcc.mapValues { (_, t) ->
                         RealisasiNetMetrics(
                             realisasi = t.first,
                             netDisburs = t.second,
-                            debtors = t.third,
-                            customers = mantriCustomerLists[mantriKey]?.sortedWith(itemComparator).orEmpty()
+                            debtors = t.third
                         )
                     },
                     hasData = unitDeb > 0

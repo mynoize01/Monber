@@ -13,6 +13,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
@@ -57,6 +58,7 @@ import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -65,6 +67,7 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -79,15 +82,19 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import com.example.R
+import com.example.ui.components.AnimatedFadeSlideDialog
 import com.example.ui.components.BriWaveHeaderBackground
 import com.example.ui.components.CurvedAnimatedBottomBar
 import com.example.ui.components.HeaderPocketSearchBar
 import com.example.ui.components.HeaderPocketSearchButton
+import com.example.ui.components.LazyLoadingFooterRow
 import com.example.ui.components.PnLoginPopupDialog
+import com.example.ui.components.rememberLazyPagedItems
 import com.example.ui.components.TableLiquidSearchBar
 import com.example.data.model.CustomerEntity
 import com.example.data.model.desa
@@ -626,8 +633,23 @@ fun DashboardScreen(
     LaunchedEffect(selectedBottomNav) {
         visualBottomNav = if (selectedBottomNav == "RENCANA") "BERANDA" else selectedBottomNav
     }
+    var activeBerandaListPage by remember { mutableStateOf<BerandaCustomerListPageRequest?>(null) }
+    var displayedBerandaListPage by remember { mutableStateOf<BerandaCustomerListPageRequest?>(null) }
+    if (activeBerandaListPage != null) {
+        displayedBerandaListPage = activeBerandaListPage
+    }
+    BackHandler(
+        enabled = activeBerandaListPage != null &&
+            !showGlobalSearchPopup &&
+            showDetailDialogForCustomer == null &&
+            !showSettingsDialog &&
+            !showLoginDialog
+    ) {
+        activeBerandaListPage = null
+    }
     BackHandler(
         enabled = selectedBottomNav == "RENCANA" &&
+            activeBerandaListPage == null &&
             !showGlobalSearchPopup &&
             showDetailDialogForCustomer == null &&
             !showSettingsDialog &&
@@ -1025,6 +1047,9 @@ fun DashboardScreen(
                                     onOpenDashboard = { viewModel.setBottomNav("DASHBOARD") },
                                     onOpenLogin = { showLoginDialog = true },
                                     onOpenUpdateDialog = { viewModel.openUpdateDialog() },
+                                    onOpenCustomerListPage = { request ->
+                                        activeBerandaListPage = request
+                                    },
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -2207,14 +2232,18 @@ fun DashboardScreen(
                 stiffness = Spring.StiffnessMediumLow,
                 visibilityThreshold = IntOffset.VisibilityThreshold
             )
-        ) { -it / 5 },
+        ) { -it / 5 } + fadeIn(
+            animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
+        ),
         exit = slideOutVertically(
             animationSpec = spring(
                 dampingRatio = Spring.DampingRatioNoBouncy,
                 stiffness = Spring.StiffnessMedium,
                 visibilityThreshold = IntOffset.VisibilityThreshold
             )
-        ) { -it / 5 },
+        ) { -it / 5 } + fadeOut(
+            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
+        ),
         modifier = Modifier
             .align(Alignment.TopCenter)
             .zIndex(99f)
@@ -2320,10 +2349,113 @@ fun DashboardScreen(
 }
     }
 
+    androidx.compose.animation.AnimatedVisibility(
+        visible = activeBerandaListPage != null,
+        enter = slideInHorizontally(
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow,
+                visibilityThreshold = IntOffset.VisibilityThreshold
+            ),
+            initialOffsetX = { fullWidth -> fullWidth }
+        ) + fadeIn(
+            animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
+        ),
+        exit = slideOutHorizontally(
+            animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+            targetOffsetX = { fullWidth -> fullWidth }
+        ) + fadeOut(
+            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
+        ),
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(50f)
+    ) {
+        displayedBerandaListPage?.let { pageRequest ->
+            BerandaFilteredCustomerListPage(
+                request = pageRequest,
+                formatter = formatter,
+                onBack = { activeBerandaListPage = null },
+                onCustomerClick = { customer ->
+                    showDetailDialogForCustomer = customer
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+
     if (showSimpananFilterBottomSheet) {
+        val simpananSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val simpananSheetScope = rememberCoroutineScope()
+        val density = LocalDensity.current
+        val initialSlidePx = remember(density) { with(density) { 44.dp.toPx() } }
+        val exitSlidePx = remember(density) { with(density) { 56.dp.toPx() } }
+        val sheetContentAlpha = remember { Animatable(0f) }
+        val sheetContentOffsetY = remember { Animatable(initialSlidePx) }
+        var isSimpananDismissing by remember { mutableStateOf(false) }
+        var simpananHasBeenVisible by remember { mutableStateOf(false) }
+
+        LaunchedEffect(Unit) {
+            launch {
+                sheetContentAlpha.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)
+                )
+            }
+            launch {
+                sheetContentOffsetY.animateTo(
+                    targetValue = 0f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                )
+            }
+        }
+
+        LaunchedEffect(simpananSheetState.currentValue, simpananSheetState.targetValue) {
+            if (simpananSheetState.currentValue != SheetValue.Hidden) {
+                simpananHasBeenVisible = true
+            } else if (simpananHasBeenVisible && simpananSheetState.targetValue == SheetValue.Hidden && !isSimpananDismissing) {
+                launch {
+                    sheetContentAlpha.animateTo(0f, tween(durationMillis = 180, easing = FastOutSlowInEasing))
+                }
+                launch {
+                    sheetContentOffsetY.animateTo(exitSlidePx, tween(durationMillis = 200, easing = FastOutSlowInEasing))
+                }
+            }
+        }
+
+        val dismissSimpananSheet: () -> Unit = {
+            if (!isSimpananDismissing) {
+                isSimpananDismissing = true
+                simpananSheetScope.launch {
+                    val fadeJob = launch {
+                        sheetContentAlpha.animateTo(0f, tween(durationMillis = 190, easing = FastOutSlowInEasing))
+                    }
+                    val slideJob = launch {
+                        sheetContentOffsetY.animateTo(exitSlidePx, tween(durationMillis = 210, easing = FastOutSlowInEasing))
+                    }
+                    try {
+                        simpananSheetState.hide()
+                        fadeJob.join()
+                        slideJob.join()
+                        showSimpananFilterBottomSheet = false
+                    } catch (_: CancellationException) {
+                        // Sheet disposed externally
+                    }
+                }
+            }
+        }
+
         ModalBottomSheet(
-            onDismissRequest = { showSimpananFilterBottomSheet = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            onDismissRequest = {
+                if (!isSimpananDismissing) {
+                    isSimpananDismissing = true
+                    showSimpananFilterBottomSheet = false
+                }
+            },
+            sheetState = simpananSheetState,
             containerColor = MaterialTheme.colorScheme.surface,
             scrimColor = Color.Black.copy(alpha = 0.5f)
         ) {
@@ -2332,6 +2464,10 @@ fun DashboardScreen(
                     .fillMaxWidth()
                     .fillMaxHeight(0.85f)
                     .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .graphicsLayer {
+                        alpha = sheetContentAlpha.value
+                        translationY = sheetContentOffsetY.value
+                    }
             ) {
                 // Header of Bottom Sheet
                 Row(
@@ -2352,7 +2488,7 @@ fun DashboardScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(onClick = { showSimpananFilterBottomSheet = false }) {
+                    IconButton(onClick = dismissSimpananSheet) {
                         Icon(imageVector = Icons.Default.Close, contentDescription = "Tutup")
                     }
                 }
@@ -2452,9 +2588,19 @@ fun DashboardScreen(
                             
                             HorizontalDivider(color = Color(0xFFFFCCB0))
                             
-                            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            val simpananListState = rememberLazyListState()
+                            val pagedSimpananList = rememberLazyPagedItems(
+                                items = filteredAndSortedListWithKode2,
+                                listState = simpananListState,
+                                pageSize = 30,
+                                prefetchDistance = 6
+                            )
+                            LazyColumn(
+                                state = simpananListState,
+                                modifier = Modifier.fillMaxSize()
+                            ) {
                                 itemsIndexed(
-                                    items = filteredAndSortedListWithKode2,
+                                    items = pagedSimpananList.visibleItems,
                                     key = { index, pair -> "${pair.first.cif}_${pair.first.noTabungan}_$index" }
                                 ) { index, pair ->
                                     val row = pair.first
@@ -2463,6 +2609,7 @@ fun DashboardScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .animateItem()
                                             .background(rowBg)
                                             .padding(vertical = 8.dp, horizontal = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically
@@ -2510,8 +2657,17 @@ fun DashboardScreen(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     }
-                                    if (index < filteredAndSortedListWithKode2.lastIndex) {
+                                    if (index < pagedSimpananList.visibleItems.lastIndex) {
                                         HorizontalDivider(color = Color(0xFFFFCCB0).copy(alpha = 0.3f))
+                                    }
+                                }
+
+                                if (pagedSimpananList.hasMore) {
+                                    item(key = "simpanan_sheet_lazy_footer") {
+                                        LazyLoadingFooterRow(
+                                            visibleCount = pagedSimpananList.visibleItems.size,
+                                            totalCount = pagedSimpananList.totalCount
+                                        )
                                     }
                                 }
                             }
@@ -6372,10 +6528,7 @@ fun DashboardScreen(
     }
 
     if (showTusimPopup) {
-        androidx.compose.ui.window.Dialog(
-            onDismissRequest = { showTusimPopup = false },
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
-        ) {
+        AnimatedFadeSlideDialog(onDismiss = { showTusimPopup = false }) { requestDismiss ->
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -6399,7 +6552,7 @@ fun DashboardScreen(
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF001C3B)
                         )
-                        IconButton(onClick = { showTusimPopup = false }) {
+                        IconButton(onClick = requestDismiss) {
                             Icon(imageVector = Icons.Default.Close, contentDescription = "Tutup")
                         }
                     }
@@ -6457,16 +6610,25 @@ fun DashboardScreen(
                         
                         HorizontalDivider(color = Color.LightGray, thickness = 1.dp)
                         
+                        val tusimListState = rememberLazyListState()
+                        val pagedTusimItems = rememberLazyPagedItems(
+                            items = tusimPopupItems,
+                            listState = tusimListState,
+                            pageSize = 30,
+                            prefetchDistance = 6
+                        )
                         LazyColumn(
+                            state = tusimListState,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(max = 420.dp)
                         ) {
-                            itemsIndexed(tusimPopupItems) { idx, item ->
+                            itemsIndexed(pagedTusimItems.visibleItems) { idx, item ->
                                 val rowBg = if (idx % 2 == 0) Color.White else Color(0xFFF5F9FD)
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .animateItem()
                                         .background(rowBg)
                                         .padding(vertical = 8.dp, horizontal = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
@@ -6506,6 +6668,15 @@ fun DashboardScreen(
                                 }
                                 HorizontalDivider(color = Color.LightGray.copy(alpha = 0.5f), thickness = 0.5.dp)
                             }
+
+                            if (pagedTusimItems.hasMore) {
+                                item(key = "tusim_popup_lazy_footer") {
+                                    LazyLoadingFooterRow(
+                                        visibleCount = pagedTusimItems.visibleItems.size,
+                                        totalCount = pagedTusimItems.totalCount
+                                    )
+                                }
+                            }
                         }
                     }
                     
@@ -6515,7 +6686,7 @@ fun DashboardScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = { showTusimPopup = false }) {
+                        TextButton(onClick = requestDismiss) {
                             Text("TUTUP", color = Color(0xFF005FAF), fontWeight = FontWeight.Bold)
                         }
                     }

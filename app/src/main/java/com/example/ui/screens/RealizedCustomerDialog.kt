@@ -7,6 +7,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -24,9 +25,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.CustomerEntity
+import com.example.ui.components.AnimatedFadeSlideDialog
+import com.example.ui.components.LazyLoadingFooterRow
+import com.example.ui.components.rememberLazyPagedItems
 import java.text.NumberFormat
 
 data class RealizedCustomerItem(
@@ -88,10 +90,7 @@ fun RealizedCustomersPopupDialog(
 
     val horizontalScrollState = rememberScrollState()
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    AnimatedFadeSlideDialog(onDismiss = onDismiss) { requestDismiss ->
         Card(
             modifier = Modifier
                 .fillMaxWidth(0.96f)
@@ -133,7 +132,7 @@ fun RealizedCustomersPopupDialog(
                     }
 
                     IconButton(
-                        onClick = onDismiss,
+                        onClick = requestDismiss,
                         modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
@@ -323,12 +322,27 @@ fun RealizedCustomersPopupDialog(
                                 HorizontalDivider(color = Color(0xFFFFCCB0))
 
                                 // Table Body Rows matching TableRow
+                                val realizedListState = rememberLazyListState()
+                                val realizedResetKey = filterStatus to searchQuery.trim()
+                                LaunchedEffect(realizedResetKey) {
+                                    if (realizedListState.firstVisibleItemIndex > 0) {
+                                        realizedListState.scrollToItem(0)
+                                    }
+                                }
+                                val pagedRealizedList = rememberLazyPagedItems(
+                                    items = filteredList,
+                                    listState = realizedListState,
+                                    pageSize = 30,
+                                    prefetchDistance = 6,
+                                    resetKey = realizedResetKey
+                                )
                                 LazyColumn(
+                                    state = realizedListState,
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxWidth()
                                 ) {
-                                    itemsIndexed(filteredList) { index, item ->
+                                    itemsIndexed(pagedRealizedList.visibleItems) { index, item ->
                                         val rowBg = if (index % 2 == 0) Color(0xFFEEF4FC) else Color(0xFFD5E3F5)
                                         Row(
                                             modifier = Modifier
@@ -437,6 +451,15 @@ fun RealizedCustomersPopupDialog(
                                             }
                                         }
                                         HorizontalDivider(color = Color(0xFFFFCCB0))
+                                    }
+
+                                    if (pagedRealizedList.hasMore) {
+                                        item(key = "realized_lazy_footer") {
+                                            LazyLoadingFooterRow(
+                                                visibleCount = pagedRealizedList.visibleItems.size,
+                                                totalCount = pagedRealizedList.totalCount
+                                            )
+                                        }
                                     }
                                 }
 
