@@ -37,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.GroupOff
@@ -68,9 +69,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CustomerEntity
 import com.example.data.model.desa
+import com.example.ui.components.ActiveDateRangeBanner
+import com.example.ui.components.CustomerDateField
+import com.example.ui.components.DateRangeFilterDialog
+import com.example.ui.components.DateRangeQuickPreset
 import com.example.ui.components.LazyLoadingFooterRow
+import com.example.ui.components.filterCustomersByDateRange
+import com.example.ui.components.formatDateRangeSummary
 import com.example.ui.components.rememberLazyPagedItems
 import java.text.NumberFormat
+import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -115,6 +123,16 @@ fun BerandaFilteredCustomerListPage(
     var sortOption by remember(request.filterType, request.filterValue, request.scopeLabel) {
         mutableStateOf(if (isUrgentKolek) BerandaListSortOption.TUNGGAKAN_DESC else BerandaListSortOption.OS_DESC)
     }
+    var dateRangeField by remember(request.filterType, request.filterValue, request.scopeLabel) {
+        mutableStateOf(CustomerDateField.TGL_REAL)
+    }
+    var dateRangeStart by remember(request.filterType, request.filterValue, request.scopeLabel) {
+        mutableStateOf<LocalDate?>(null)
+    }
+    var dateRangeEnd by remember(request.filterType, request.filterValue, request.scopeLabel) {
+        mutableStateOf<LocalDate?>(null)
+    }
+    var showDateRangeDialog by remember { mutableStateOf(false) }
 
     val (accentColor, badgeBgColor, badgeBorderColor) = remember(request.filterType, request.filterValue) {
         when {
@@ -159,7 +177,7 @@ fun BerandaFilteredCustomerListPage(
         mutableStateOf(true)
     }
 
-    LaunchedEffect(request, searchQuery, sortOption) {
+    LaunchedEffect(request, searchQuery, sortOption, dateRangeField, dateRangeStart, dateRangeEnd) {
         isProcessing = processedState.filteredCustomers.isEmpty() && processedState.categoryCount == 0
         val result = withContext(Dispatchers.Default) {
             val targetValueUpper = request.filterValue.trim().uppercase()
@@ -179,11 +197,18 @@ fun BerandaFilteredCustomerListPage(
                 }
             }
 
+            val dateFiltered = filterCustomersByDateRange(
+                customers = categoryMatched,
+                field = dateRangeField,
+                startDate = dateRangeStart,
+                endDate = dateRangeEnd
+            )
+
             val q = searchQuery.trim()
             val filtered = if (q.isEmpty()) {
-                categoryMatched
+                dateFiltered
             } else {
-                categoryMatched.filter { cust ->
+                dateFiltered.filter { cust ->
                     cust.namaNasabah.contains(q, ignoreCase = true) ||
                         cust.noRekening.contains(q, ignoreCase = true) ||
                         cust.cif.contains(q, ignoreCase = true) ||
@@ -227,7 +252,7 @@ fun BerandaFilteredCustomerListPage(
     val listState = rememberLazyListState()
     val paginationResetKey = Triple(
         "${request.filterType}_${request.filterValue}_${request.scopeLabel}",
-        searchQuery.trim(),
+        "${searchQuery.trim()}_${dateRangeField.key}_${dateRangeStart}_${dateRangeEnd}",
         sortOption
     )
     LaunchedEffect(paginationResetKey) {
@@ -472,7 +497,102 @@ fun BerandaFilteredCustomerListPage(
                     )
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Real-time Date Range Quick Filter Row
+                val isDateFilterActive = dateRangeStart != null || dateRangeEnd != null
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .clip(RoundedCornerShape(999.dp))
+                            .clickable { showDateRangeDialog = true }
+                            .testTag("beranda_list_page_date_range_btn"),
+                        shape = RoundedCornerShape(999.dp),
+                        color = if (isDateFilterActive) accentColor else Color.White,
+                        border = BorderStroke(1.dp, if (isDateFilterActive) accentColor else Color(0xFFCBD5E1))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DateRange,
+                                contentDescription = "Filter Rentang Tanggal",
+                                tint = if (isDateFilterActive) Color.White else accentColor,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = if (isDateFilterActive) {
+                                    "${dateRangeField.shortLabel}: ${formatDateRangeSummary(dateRangeStart, dateRangeEnd)}"
+                                } else {
+                                    "Rentang Tanggal"
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDateFilterActive) Color.White else Color(0xFF334155),
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    DateRangeQuickPreset.entries.forEach { preset ->
+                        val (pStart, pEnd) = remember(preset) { preset.resolveBounds() }
+                        val isPresetActive = dateRangeStart == pStart && dateRangeEnd == pEnd
+                        Surface(
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable {
+                                    if (isPresetActive) {
+                                        dateRangeStart = null
+                                        dateRangeEnd = null
+                                    } else {
+                                        dateRangeStart = pStart
+                                        dateRangeEnd = pEnd
+                                    }
+                                }
+                                .testTag("beranda_list_page_preset_${preset.name.lowercase()}"),
+                            shape = RoundedCornerShape(999.dp),
+                            color = if (isPresetActive) accentColor.copy(alpha = 0.14f) else Color.White,
+                            border = BorderStroke(
+                                1.dp,
+                                if (isPresetActive) accentColor else Color(0xFFE2E8F0)
+                            )
+                        ) {
+                            Text(
+                                text = preset.label,
+                                fontSize = 11.sp,
+                                fontWeight = if (isPresetActive) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isPresetActive) accentColor else Color(0xFF475569),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+
+                ActiveDateRangeBanner(
+                    field = dateRangeField,
+                    startDate = dateRangeStart,
+                    endDate = dateRangeEnd,
+                    resultCount = processedState.filteredCustomers.size,
+                    accentColor = accentColor,
+                    onEditClick = { showDateRangeDialog = true },
+                    onClearClick = {
+                        dateRangeStart = null
+                        dateRangeEnd = null
+                    },
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Sort Chips Row
                 Row(
@@ -518,7 +638,7 @@ fun BerandaFilteredCustomerListPage(
                     Text(
                         text = if (isProcessing) {
                             "Menyiapkan daftar nasabah..."
-                        } else if (searchQuery.isBlank()) {
+                        } else if (searchQuery.isBlank() && !isDateFilterActive) {
                             if (pagedResult.hasMore) {
                                 "Menampilkan ${pagedResult.visibleItems.size} dari ${formatter.format(pagedResult.totalCount)} nasabah"
                             } else {
@@ -684,6 +804,44 @@ fun BerandaFilteredCustomerListPage(
             }
         }
     }
+
+    if (showDateRangeDialog) {
+        val targetValueUpper = remember(request.filterValue) { request.filterValue.trim().uppercase() }
+        val categoryBaseCustomers = remember(request.customers, request.filterType, targetValueUpper) {
+            when (request.filterType) {
+                BerandaListFilterType.KUALITAS -> request.customers.filter { cust ->
+                    val k = cust.kolek.trim().uppercase()
+                    when (targetValueUpper) {
+                        "LANCAR" -> k == "L" || k == "LANCAR" || k == "1" || (k.contains("LANCAR") && !k.contains("KURANG"))
+                        "SML" -> k.startsWith("SML") || k.contains("DPK") || k == "2"
+                        "NPL" -> k == "KL" || k.contains("KURANG") || k == "D" || k.contains("DIRAGUKAN") ||
+                            k == "M" || k.contains("MACET") || k == "3" || k == "4" || k == "5" || k == "NPL"
+                        else -> false
+                    }
+                }
+                BerandaListFilterType.SEGMEN -> request.customers.filter { cust ->
+                    cust.segmen.trim().uppercase().ifBlank { "LAINNYA" } == targetValueUpper
+                }
+            }
+        }
+
+        DateRangeFilterDialog(
+            initialField = dateRangeField,
+            initialStartDate = dateRangeStart,
+            initialEndDate = dateRangeEnd,
+            accentColor = accentColor,
+            countProvider = { f, s, e ->
+                filterCustomersByDateRange(categoryBaseCustomers, f, s, e).size
+            },
+            onApply = { field, start, end ->
+                dateRangeField = field
+                dateRangeStart = start
+                dateRangeEnd = end
+                showDateRangeDialog = false
+            },
+            onDismiss = { showDateRangeDialog = false }
+        )
+    }
 }
 
 @Composable
@@ -819,7 +977,7 @@ private fun BerandaFilteredCustomerCard(
                         border = BorderStroke(0.8.dp, kolekBorder)
                     ) {
                         Text(
-                            text = "Kolek $kolekText",
+                            text = kolekText,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = kolekAccent,

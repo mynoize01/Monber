@@ -77,7 +77,10 @@ data class ToggleFilters(
     val tuc: Boolean,
     val tg6: Boolean,
     val jt: Boolean,
-    val jtH: Int = 0
+    val jtH: Int = 0,
+    val dateField: String = "TGL_REAL",
+    val dateStart: String = "",
+    val dateEnd: String = ""
 )
 
 data class CustomerListMetadata(
@@ -107,7 +110,10 @@ data class FilterParams(
     val tunggakanKurang6Bln: Boolean = false,
     val jatuhTempoOnly: Boolean = false,
     val jatuhTempoH: Int = 0,
-    val desa: String = "SEMUA"
+    val desa: String = "SEMUA",
+    val dateRangeField: String = "TGL_REAL",
+    val dateRangeStart: String = "",
+    val dateRangeEnd: String = ""
 )
 
 const val DEFAULT_WA_DETAIL_TEMPLATE = """Selamat siang Bapak/Ibu *{nama},*
@@ -859,9 +865,17 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     }
 
     private val isLoadingMonthlyChart = MutableStateFlow(false)
+    @Volatile private var lastRealisasiComputeSignature: String? = null
 
     fun loadAllMonthlyChartData(forceRefresh: Boolean = false) {
         if (isLoadingMonthlyChart.value && !forceRefresh) return
+        if (!forceRefresh &&
+            dashboardMonthlySummary.value.size >= 12 &&
+            dashboardMonthlyKolekSummary.value.size >= 12 &&
+            dashboardMonthlyRealisasi.value.isNotEmpty()
+        ) {
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             isLoadingMonthlyChart.value = true
             try {
@@ -921,7 +935,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                     dashboardMonthlyMantriSummary.value = updatedMantri
                     persistCurrentSummaries()
                 }
-                recomputeMonthlyRealisasiChartInternal()
+                recomputeMonthlyRealisasiChartInternal(force = forceRefresh || changed)
             } catch (e: Exception) {
                 android.util.Log.e("CustomerViewModel", "Failed to batch load 12-month chart data", e)
             } finally {
@@ -930,17 +944,21 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun refreshMonthlyRealisasiChart() {
+    fun refreshMonthlyRealisasiChart(force: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
-            recomputeMonthlyRealisasiChartInternal()
+            recomputeMonthlyRealisasiChartInternal(force = force)
         }
     }
 
-    private suspend fun recomputeMonthlyRealisasiChartInternal() {
+    private suspend fun recomputeMonthlyRealisasiChartInternal(force: Boolean = false) {
         try {
             val dailyList = dailyCustomers.value
             val akhirList = akhirBulanCustomers.value
             val blnLaluList = bulanLaluCustomers.value
+            val signature = "${dailyList.size}|${akhirList.size}|${blnLaluList.size}|${periodDateDaily.value}|${periodDateAkhirBulan.value}|${periodDateBulanLalu.value}|${dashboardMonthlySummary.value.size}"
+            if (!force && signature == lastRealisasiComputeSignature && dashboardMonthlyRealisasi.value.isNotEmpty()) {
+                return
+            }
             val intraList = repository.getCustomersFlow("INTRAKOMP").first()
             val activePool = dailyList.ifEmpty { akhirList }.ifEmpty { intraList }
 
@@ -1140,6 +1158,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             }
 
             dashboardMonthlyRealisasi.value = resultMap
+            lastRealisasiComputeSignature = signature
         } catch (e: Exception) {
             android.util.Log.e("CustomerViewModel", "Failed to recompute monthly realisasi chart", e)
         }
@@ -2203,6 +2222,9 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             .putBoolean("filter_${menu}_jt_only", filters.jatuhTempoOnly)
             .putInt("filter_${menu}_jt_h", filters.jatuhTempoH)
             .putString("filter_${menu}_desa", filters.desa)
+            .putString("filter_${menu}_date_field", filters.dateRangeField)
+            .putString("filter_${menu}_date_start", filters.dateRangeStart)
+            .putString("filter_${menu}_date_end", filters.dateRangeEnd)
             .apply()
     }
 
@@ -2227,7 +2249,10 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             tunggakanKurang6Bln = sharedPrefs.getBoolean("filter_${menu}_tg_kurang_6_bln", false),
             jatuhTempoOnly = sharedPrefs.getBoolean("filter_${menu}_jt_only", false),
             jatuhTempoH = sharedPrefs.getInt("filter_${menu}_jt_h", 0),
-            desa = sharedPrefs.getString("filter_${menu}_desa", "SEMUA") ?: "SEMUA"
+            desa = sharedPrefs.getString("filter_${menu}_desa", "SEMUA") ?: "SEMUA",
+            dateRangeField = sharedPrefs.getString("filter_${menu}_date_field", "TGL_REAL") ?: "TGL_REAL",
+            dateRangeStart = sharedPrefs.getString("filter_${menu}_date_start", "") ?: "",
+            dateRangeEnd = sharedPrefs.getString("filter_${menu}_date_end", "") ?: ""
         )
     }
 
@@ -2258,6 +2283,20 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     val filterJatuhTempoOnly = MutableStateFlow(initialFilters.jatuhTempoOnly)
     val selectedJatuhTempoH = MutableStateFlow(initialFilters.jatuhTempoH)
     val filterDesa = MutableStateFlow(initialFilters.desa)
+    val filterDateRangeField = MutableStateFlow(initialFilters.dateRangeField)
+    val filterDateRangeStart = MutableStateFlow(initialFilters.dateRangeStart)
+    val filterDateRangeEnd = MutableStateFlow(initialFilters.dateRangeEnd)
+
+    fun setDateRangeFilter(fieldKey: String, startIso: String, endIso: String) {
+        filterDateRangeField.value = fieldKey
+        filterDateRangeStart.value = startIso
+        filterDateRangeEnd.value = endIso
+    }
+
+    fun clearDateRangeFilter() {
+        filterDateRangeStart.value = ""
+        filterDateRangeEnd.value = ""
+    }
 
     val sortColumn = MutableStateFlow(
         try {
@@ -2318,13 +2357,23 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         combine(filterPlafondRange, filterTenorRange, filterSegmen) { p, t, seg -> Triple(p, t, seg) },
         combine(filterKolekUpdate, filterNpd, filterAlamat, filterKolekBlnLalu, filterDesa) { ku, npd, al, kbl, des -> listOf(ku, npd, al, kbl, des) },
         combine(
-            filterSetorPokok,
-            filterTusim,
-            filterTucil,
-            filterTunggakanKurang6Bln,
-            combine(filterJatuhTempoOnly, selectedJatuhTempoH) { jt, jh -> jt to jh }
-        ) { sp, tus, tuc, tg6, jtPair ->
-            ToggleFilters(sp, tus, tuc, tg6, jtPair.first, jtPair.second)
+            combine(filterSetorPokok, filterTusim, filterTucil, filterTunggakanKurang6Bln) { sp, tus, tuc, tg6 ->
+                listOf(sp, tus, tuc, tg6)
+            },
+            combine(filterJatuhTempoOnly, selectedJatuhTempoH) { jt, jh -> jt to jh },
+            combine(filterDateRangeField, filterDateRangeStart, filterDateRangeEnd) { df, ds, de -> Triple(df, ds, de) }
+        ) { toggles, jtPair, dateRangeTriple ->
+            ToggleFilters(
+                sp = toggles[0],
+                tus = toggles[1],
+                tuc = toggles[2],
+                tg6 = toggles[3],
+                jt = jtPair.first,
+                jtH = jtPair.second,
+                dateField = dateRangeTriple.first,
+                dateStart = dateRangeTriple.second,
+                dateEnd = dateRangeTriple.third
+            )
         }
     ) { group1, group2, group3, group4, group5 ->
         FilterParams(
@@ -2347,7 +2396,10 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             tunggakanKurang6Bln = group5.tg6,
             jatuhTempoOnly = group5.jt,
             jatuhTempoH = group5.jtH,
-            desa = group4[4]
+            desa = group4[4],
+            dateRangeField = group5.dateField,
+            dateRangeStart = group5.dateStart,
+            dateRangeEnd = group5.dateEnd
         )
     }
 
@@ -2967,6 +3019,19 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                     else -> true
                 }
             }
+        }
+
+        // 9. Date Range filter (Real-time narrowing by Tgl Realisasi or Tgl Lunas)
+        if (filterParams.dateRangeStart.isNotBlank() || filterParams.dateRangeEnd.isNotBlank()) {
+            val field = com.example.ui.components.CustomerDateField.fromKey(filterParams.dateRangeField)
+            val startLocal = DateTenorUtils.parseIsoLocalDate(filterParams.dateRangeStart)
+            val endLocal = DateTenorUtils.parseIsoLocalDate(filterParams.dateRangeEnd)
+            filteredList = com.example.ui.components.filterCustomersByDateRange(
+                customers = filteredList,
+                field = field,
+                startDate = startLocal,
+                endDate = endLocal
+            )
         }
 
         filteredList
@@ -3691,7 +3756,10 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             tunggakanKurang6Bln = filterTunggakanKurang6Bln.value,
             jatuhTempoOnly = filterJatuhTempoOnly.value,
             jatuhTempoH = selectedJatuhTempoH.value,
-            desa = filterDesa.value
+            desa = filterDesa.value,
+            dateRangeField = filterDateRangeField.value,
+            dateRangeStart = filterDateRangeStart.value,
+            dateRangeEnd = filterDateRangeEnd.value
         )
         menuFilterCache[oldMenu] = currentFilters
         saveMenuFiltersToPrefs(oldMenu, currentFilters)
@@ -3721,6 +3789,9 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             filterJatuhTempoOnly.value = newFilters.jatuhTempoOnly
             selectedJatuhTempoH.value = newFilters.jatuhTempoH
             filterDesa.value = newFilters.desa
+            filterDateRangeField.value = newFilters.dateRangeField
+            filterDateRangeStart.value = newFilters.dateRangeStart
+            filterDateRangeEnd.value = newFilters.dateRangeEnd
 
             selectedMenu.value = menu
             menuFilterCache[menu] = newFilters
@@ -3753,6 +3824,8 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         filterTucil.value = false
         filterTunggakanKurang6Bln.value = false
         filterJatuhTempoOnly.value = false
+        filterDateRangeStart.value = ""
+        filterDateRangeEnd.value = ""
     }
 
     fun checkAndRefreshIfEmpty(menu: String) {

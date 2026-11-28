@@ -1,10 +1,10 @@
 {
-  "versionCode": 15,
-  "versionName": "1.5.4",
-  "tagName": "v1.5.4",
-  "releaseName": "MonBer v1.5.4",
-  "releaseNotes": "Pembaruan MonBer v1.5.4: animasi popup daftar nasabah, halaman daftar nasabah terpisah untuk Kualitas & Segmen, lazy loading daftar nasabah, dan perbaikan konfigurasi keystore serta build APK.",
-  "apkUrl": "https://github.com/mynoize01/Monber/releases/download/v1.5.4/MonBer-v1.5.4.apk",
-  "htmlUrl": "https://github.com/mynoize01/Monber/releases/tag/v1.5.4",
+  "versionCode": 16,
+  "versionName": "1.5.5",
+  "tagName": "v1.5.5",
+  "releaseName": "MonBer v1.5.5",
+  "releaseNotes": "Pembaruan MonBer v1.5.5: fitur filter rentang tanggal real-time (Tgl Realisasi & Tgl Lunas/JT) untuk mempersempit daftar nasabah, penyegaran tampilan tombol ringkasan Beranda, dan optimalisasi performa navigasi.",
+  "apkUrl": "https://github.com/mynoize01/Monber/releases/download/v1.5.5/MonBer-v1.5.5.apk",
+  "htmlUrl": "https://github.com/mynoize01/Monber/releases/tag/v1.5.5",
   "apkSizeBytes": 0
 }

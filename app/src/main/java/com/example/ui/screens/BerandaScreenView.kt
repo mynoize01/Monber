@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.graphics.BitmapFactory
 import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -103,10 +104,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -118,6 +121,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -139,6 +143,7 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -246,6 +251,51 @@ private data class BerandaNotificationCustomerItem(
     val isKunjungan: Boolean
 )
 
+private data class BerandaUnitBaseDerived(
+    val fallbackUnitSummary: UnitSummaryData = UnitSummaryData(),
+    val fallbackUnitKolek: KolekSummaryData = KolekSummaryData(),
+    val kelolaanCustomers: List<CustomerEntity> = emptyList(),
+    val kelolaanCustomersSummary: UnitSummaryData = UnitSummaryData(),
+    val kelolaanCustomersKolek: KolekSummaryData = KolekSummaryData()
+)
+
+private class BerandaUnitBaseCacheEntry(
+    val monitoring: List<CustomerEntity>,
+    val loggedInPN: String,
+    val cleanPnDigits: String,
+    val displayName: String,
+    val result: BerandaUnitBaseDerived
+)
+
+private data class BerandaPortfolioDerived(
+    val kelolaanSegmenSource: List<CustomerEntity> = emptyList(),
+    val resolvedBerandaCustomers: List<CustomerEntity> = emptyList(),
+    val segmenKelolaanGroups: List<Triple<String, Double, Int>> = emptyList(),
+    val tusimData: BerandaAlertCategoryData = BerandaAlertCategoryData(),
+    val tucilData: BerandaAlertCategoryData = BerandaAlertCategoryData(),
+    val tunggakanUnder6Data: BerandaAlertCategoryData = BerandaAlertCategoryData(),
+    val notificationCustomers: List<BerandaNotificationCustomerItem> = emptyList()
+)
+
+private class BerandaPortfolioCacheEntry(
+    val monitoring: List<CustomerEntity>,
+    val daily: List<CustomerEntity>,
+    val akhir: List<CustomerEntity>,
+    val kelolaanCustomers: List<CustomerEntity>,
+    val dailyDataMap: Map<String, CustomerEntity>,
+    val di319Rows: List<com.example.data.model.Di319Row>,
+    val kunjunganKeys: Set<String>,
+    val loggedInPN: String,
+    val cleanPnDigits: String,
+    val displayName: String,
+    val effectiveScope: BerandaScope,
+    val result: BerandaPortfolioDerived
+)
+
+@Volatile private var cachedBerandaBgBitmap: ImageBitmap? = null
+@Volatile private var cachedUnitBaseEntry: BerandaUnitBaseCacheEntry? = null
+@Volatile private var cachedPortfolioEntry: BerandaPortfolioCacheEntry? = null
+
 @Composable
 fun BerandaScreenView(
     viewModel: CustomerViewModel,
@@ -298,6 +348,7 @@ fun BerandaScreenView(
     val appUpdateState by viewModel.appUpdateState.collectAsState()
 
     LaunchedEffect(Unit) {
+        delay(220)
         viewModel.loadAllMonthlyChartData()
         if (summaryDaily.debtors == 0) {
             viewModel.loadSummaryForPeriod("DAILY")
@@ -308,6 +359,7 @@ fun BerandaScreenView(
     }
 
     LaunchedEffect(dailyCustomers.size, akhirBulanCustomers.size, monitoringCustomers.size) {
+        delay(240)
         viewModel.refreshMonthlyRealisasiChart()
     }
 
@@ -354,38 +406,80 @@ fun BerandaScreenView(
         }?.value
     }
 
-    // Dynamic fallback from live monitoringCustomers (INTRAKOMP)
-    val fallbackUnitSummary = remember(monitoringCustomers) {
-        UnitSummaryData(
-            os = monitoringCustomers.sumOf { it.osPinjaman },
-            debtors = monitoringCustomers.size
-        )
-    }
-    val fallbackUnitKolek = remember(monitoringCustomers) {
-        calculateKolekSummaryFromList(monitoringCustomers)
-    }
-
-    val kelolaanCustomers = remember(monitoringCustomers, loggedInPN, cleanPnDigits) {
-        if (loggedInPN.isBlank()) {
-            emptyList()
+    // Compute Unit fallback & Kelolaan base off the main thread with instant reference cache
+    val matchedUnitBaseCache = remember(monitoringCustomers, loggedInPN, cleanPnDigits, displayName) {
+        val cached = cachedUnitBaseEntry
+        if (cached != null &&
+            cached.monitoring === monitoringCustomers &&
+            cached.loggedInPN == loggedInPN &&
+            cached.cleanPnDigits == cleanPnDigits &&
+            cached.displayName == displayName
+        ) {
+            cached.result
         } else {
-            monitoringCustomers.filter { cust ->
-                val custPnDigits = cust.pnMantri.filter { it.isDigit() }.trimStart('0')
-                (cleanPnDigits.isNotBlank() && custPnDigits == cleanPnDigits) ||
-                    cust.pnMantri.trim().equals(loggedInPN.trim(), ignoreCase = true) ||
-                    cust.namaMantri.contains(loggedInPN.trim(), ignoreCase = true) ||
-                    cust.namaMantri.contains(displayName, ignoreCase = true)
-            }
+            null
         }
     }
-    val kelolaanSummaryFromDaily = remember(mantriSummaryDaily, kelolaanCustomers, displayName, cleanPnDigits) {
+    val unitBaseDerived by produceState(
+        initialValue = matchedUnitBaseCache ?: cachedUnitBaseEntry?.result ?: BerandaUnitBaseDerived(),
+        monitoringCustomers,
+        loggedInPN,
+        cleanPnDigits,
+        displayName
+    ) {
+        if (matchedUnitBaseCache != null) {
+            value = matchedUnitBaseCache
+            return@produceState
+        }
+        val computed = withContext(Dispatchers.Default) {
+            val unitSum = UnitSummaryData(
+                os = monitoringCustomers.sumOf { it.osPinjaman },
+                debtors = monitoringCustomers.size
+            )
+            val unitKol = calculateKolekSummaryFromList(monitoringCustomers)
+            val kelolaanList = if (loggedInPN.isBlank()) {
+                emptyList()
+            } else {
+                monitoringCustomers.filter { cust ->
+                    val custPnDigits = cust.pnMantri.filter { it.isDigit() }.trimStart('0')
+                    (cleanPnDigits.isNotBlank() && custPnDigits == cleanPnDigits) ||
+                        cust.pnMantri.trim().equals(loggedInPN.trim(), ignoreCase = true) ||
+                        cust.namaMantri.contains(loggedInPN.trim(), ignoreCase = true) ||
+                        cust.namaMantri.contains(displayName, ignoreCase = true)
+                }
+            }
+            val kelolaanSum = UnitSummaryData(
+                os = kelolaanList.sumOf { it.osPinjaman },
+                debtors = kelolaanList.size
+            )
+            val kelolaanKol = calculateKolekSummaryFromList(kelolaanList)
+            BerandaUnitBaseDerived(
+                fallbackUnitSummary = unitSum,
+                fallbackUnitKolek = unitKol,
+                kelolaanCustomers = kelolaanList,
+                kelolaanCustomersSummary = kelolaanSum,
+                kelolaanCustomersKolek = kelolaanKol
+            )
+        }
+        cachedUnitBaseEntry = BerandaUnitBaseCacheEntry(
+            monitoring = monitoringCustomers,
+            loggedInPN = loggedInPN,
+            cleanPnDigits = cleanPnDigits,
+            displayName = displayName,
+            result = computed
+        )
+        value = computed
+    }
+
+    val fallbackUnitSummary = unitBaseDerived.fallbackUnitSummary
+    val fallbackUnitKolek = unitBaseDerived.fallbackUnitKolek
+    val kelolaanCustomers = unitBaseDerived.kelolaanCustomers
+
+    val kelolaanSummaryFromDaily = remember(mantriSummaryDaily, unitBaseDerived, displayName, cleanPnDigits) {
         val dailyMantri = findMantriDetail(mantriSummaryDaily)
         when {
             dailyMantri != null && dailyMantri.total.debtors > 0 -> dailyMantri.total
-            kelolaanCustomers.isNotEmpty() -> UnitSummaryData(
-                os = kelolaanCustomers.sumOf { it.osPinjaman },
-                debtors = kelolaanCustomers.size
-            )
+            unitBaseDerived.kelolaanCustomersSummary.debtors > 0 -> unitBaseDerived.kelolaanCustomersSummary
             else -> {
                 val akhirMantri = findMantriDetail(mantriSummaryAkhirBulan)
                 akhirMantri?.total ?: UnitSummaryData()
@@ -416,7 +510,7 @@ fun BerandaScreenView(
         kelolaanSummaryFromDaily,
         mantriSummaryAkhirBulan,
         mantriSummaryBulanLalu,
-        kelolaanCustomers,
+        unitBaseDerived,
         displayName,
         cleanPnDigits
     ) {
@@ -425,17 +519,14 @@ fun BerandaScreenView(
         } else {
             findMantriDetail(mantriSummaryAkhirBulan)?.total
                 ?: findMantriDetail(mantriSummaryBulanLalu)?.total
-                ?: UnitSummaryData(
-                    os = kelolaanCustomers.sumOf { it.osPinjaman },
-                    debtors = kelolaanCustomers.size
-                )
+                ?: unitBaseDerived.kelolaanCustomersSummary
         }
     }
     val kelolaanActiveKolek = remember(
         mantriSummaryDaily,
         mantriSummaryAkhirBulan,
         mantriSummaryBulanLalu,
-        kelolaanCustomers,
+        unitBaseDerived,
         displayName,
         cleanPnDigits
     ) {
@@ -455,7 +546,7 @@ fun BerandaScreenView(
                 npl = target.npl
             )
         } else {
-            calculateKolekSummaryFromList(kelolaanCustomers)
+            unitBaseDerived.kelolaanCustomersKolek
         }
     }
 
@@ -677,73 +768,140 @@ fun BerandaScreenView(
     val nplDeb = activeScopeKolek.npl.debtors
     val nplOsPct = if (totalOs > 0.0) (nplOs / totalOs) * 100.0 else 0.0
 
-    val kelolaanSegmenSource = remember(
+    // Coalesce heavy customer resolution, segmen grouping, alert categories, and notifications onto Dispatchers.Default
+    val matchedPortfolioCache = remember(
+        monitoringCustomers,
         dailyCustomers,
         akhirBulanCustomers,
         kelolaanCustomers,
-        monitoringCustomers,
+        dailyDataMap,
+        di319Rows,
+        kunjunganKeys,
         loggedInPN,
         cleanPnDigits,
         displayName,
         effectiveScope
     ) {
-        val mainByRek = HashMap<String, CustomerEntity>(monitoringCustomers.size * 2)
-        val mainByCif = HashMap<String, CustomerEntity>(monitoringCustomers.size)
-        for (m in monitoringCustomers) {
-            val rawRek = m.noRekening.trim()
-            val cleanRek = rawRek.replace("-", "").replace(".", "").trim()
-            if (rawRek.isNotBlank()) mainByRek[rawRek] = m
-            if (cleanRek.isNotBlank()) mainByRek[cleanRek] = m
-            val cifKey = m.cif.trim().uppercase()
-            if (cifKey.isNotBlank()) mainByCif[cifKey] = m
-        }
-
-        fun matchMantri(list: List<CustomerEntity>): List<CustomerEntity> {
-            if (loggedInPN.isBlank()) return emptyList()
-            val targetCleanName = cleanMantriNameOnly(displayName)
-            return list.filter { cust ->
-                val rawRek = cust.noRekening.trim()
-                val cleanRek = rawRek.replace("-", "").replace(".", "").trim()
-                val mainCust = mainByRek[rawRek]
-                    ?: mainByRek[cleanRek]
-                    ?: (if (cust.cif.isNotBlank()) mainByCif[cust.cif.trim().uppercase()] else null)
-
-                val custPnDigits = cust.pnMantri.filter { it.isDigit() }.trimStart('0')
-                val mainPnDigits = mainCust?.pnMantri?.filter { it.isDigit() }?.trimStart('0') ?: ""
-                val custMantriClean = cleanMantriNameOnly(cust.namaMantri)
-                val mainMantriClean = mainCust?.let { cleanMantriNameOnly(it.namaMantri) } ?: ""
-
-                (cleanPnDigits.isNotBlank() && (custPnDigits == cleanPnDigits || mainPnDigits == cleanPnDigits)) ||
-                    cust.pnMantri.trim().equals(loggedInPN.trim(), ignoreCase = true) ||
-                    (mainCust != null && mainCust.pnMantri.trim().equals(loggedInPN.trim(), ignoreCase = true)) ||
-                    cust.namaMantri.contains(loggedInPN.trim(), ignoreCase = true) ||
-                    cust.namaMantri.contains(displayName, ignoreCase = true) ||
-                    (targetCleanName.isNotBlank() && (
-                        custMantriClean.equals(targetCleanName, ignoreCase = true) ||
-                            mainMantriClean.equals(targetCleanName, ignoreCase = true)
-                    ))
-            }
-        }
-        if (effectiveScope == BerandaScope.KELOLAAN && loggedInPN.isNotBlank()) {
-            matchMantri(dailyCustomers)
-                .ifEmpty { matchMantri(akhirBulanCustomers) }
-                .ifEmpty { kelolaanCustomers }
+        val cached = cachedPortfolioEntry
+        if (cached != null &&
+            cached.monitoring === monitoringCustomers &&
+            cached.daily === dailyCustomers &&
+            cached.akhir === akhirBulanCustomers &&
+            cached.kelolaanCustomers === kelolaanCustomers &&
+            cached.dailyDataMap === dailyDataMap &&
+            cached.di319Rows === di319Rows &&
+            cached.kunjunganKeys == kunjunganKeys &&
+            cached.loggedInPN == loggedInPN &&
+            cached.cleanPnDigits == cleanPnDigits &&
+            cached.displayName == displayName &&
+            cached.effectiveScope == effectiveScope
+        ) {
+            cached.result
         } else {
-            dailyCustomers
-                .ifEmpty { akhirBulanCustomers }
-                .ifEmpty { monitoringCustomers }
+            null
         }
     }
 
-    val resolvedBerandaCustomers by produceState(
-        initialValue = kelolaanSegmenSource,
-        kelolaanSegmenSource,
-        dailyDataMap
+    val portfolioDerived by produceState(
+        initialValue = matchedPortfolioCache ?: cachedPortfolioEntry?.result ?: BerandaPortfolioDerived(),
+        monitoringCustomers,
+        dailyCustomers,
+        akhirBulanCustomers,
+        kelolaanCustomers,
+        dailyDataMap,
+        di319Rows,
+        kunjunganKeys,
+        loggedInPN,
+        cleanPnDigits,
+        displayName,
+        effectiveScope
     ) {
-        value = withContext(Dispatchers.Default) {
-            kelolaanSegmenSource.map { cust ->
+        if (matchedPortfolioCache != null) {
+            value = matchedPortfolioCache
+            return@produceState
+        }
+        val computed = withContext(Dispatchers.Default) {
+            val mainByRek = HashMap<String, CustomerEntity>(monitoringCustomers.size * 2)
+            val mainByCif = HashMap<String, CustomerEntity>(monitoringCustomers.size)
+            for (m in monitoringCustomers) {
+                val rawRek = m.noRekening.trim()
+                val cleanRek = rawRek.replace("-", "").replace(".", "").trim()
+                if (rawRek.isNotBlank()) mainByRek[rawRek] = m
+                if (cleanRek.isNotBlank()) mainByRek[cleanRek] = m
+                val cifKey = m.cif.trim().uppercase()
+                if (cifKey.isNotBlank()) mainByCif[cifKey] = m
+            }
+
+            fun matchMantri(list: List<CustomerEntity>): List<CustomerEntity> {
+                if (loggedInPN.isBlank()) return emptyList()
+                val targetCleanName = cleanMantriNameOnly(displayName)
+                return list.filter { cust ->
+                    val rawRek = cust.noRekening.trim()
+                    val cleanRek = rawRek.replace("-", "").replace(".", "").trim()
+                    val mainCust = mainByRek[rawRek]
+                        ?: mainByRek[cleanRek]
+                        ?: (if (cust.cif.isNotBlank()) mainByCif[cust.cif.trim().uppercase()] else null)
+
+                    val custPnDigits = cust.pnMantri.filter { it.isDigit() }.trimStart('0')
+                    val mainPnDigits = mainCust?.pnMantri?.filter { it.isDigit() }?.trimStart('0') ?: ""
+                    val custMantriClean = cleanMantriNameOnly(cust.namaMantri)
+                    val mainMantriClean = mainCust?.let { cleanMantriNameOnly(it.namaMantri) } ?: ""
+
+                    (cleanPnDigits.isNotBlank() && (custPnDigits == cleanPnDigits || mainPnDigits == cleanPnDigits)) ||
+                        cust.pnMantri.trim().equals(loggedInPN.trim(), ignoreCase = true) ||
+                        (mainCust != null && mainCust.pnMantri.trim().equals(loggedInPN.trim(), ignoreCase = true)) ||
+                        cust.namaMantri.contains(loggedInPN.trim(), ignoreCase = true) ||
+                        cust.namaMantri.contains(displayName, ignoreCase = true) ||
+                        (targetCleanName.isNotBlank() && (
+                            custMantriClean.equals(targetCleanName, ignoreCase = true) ||
+                                mainMantriClean.equals(targetCleanName, ignoreCase = true)
+                            ))
+                }
+            }
+
+            val segmenSource = if (effectiveScope == BerandaScope.KELOLAAN && loggedInPN.isNotBlank()) {
+                matchMantri(dailyCustomers)
+                    .ifEmpty { matchMantri(akhirBulanCustomers) }
+                    .ifEmpty { kelolaanCustomers }
+            } else {
+                dailyCustomers
+                    .ifEmpty { akhirBulanCustomers }
+                    .ifEmpty { monitoringCustomers }
+            }
+
+            val savingsMaxByNormCif = HashMap<String, Double>(di319Rows.size)
+            for (row in di319Rows) {
+                val norm = normalizeBerandaCif(row.cif)
+                if (norm.isNotEmpty()) {
+                    val prev = savingsMaxByNormCif[norm] ?: 0.0
+                    if (row.saldo > prev) savingsMaxByNormCif[norm] = row.saldo
+                }
+            }
+
+            val nowDate = LocalDate.now()
+            val todayDayOfMonth = nowDate.dayOfMonth
+
+            val resolvedCustomers = ArrayList<CustomerEntity>(segmenSource.size)
+            val segmenBuckets = HashMap<String, Pair<Double, Int>>()
+
+            var tusimOs = 0.0
+            var tusimCount = 0
+            val tusimList = mutableListOf<BerandaAlertCustomerItem>()
+
+            var tucilOs = 0.0
+            var tucilCount = 0
+            val tucilList = mutableListOf<BerandaAlertCustomerItem>()
+
+            var tg6Os = 0.0
+            var tg6Count = 0
+            val tg6List = mutableListOf<BerandaAlertCustomerItem>()
+
+            val seenNotifKeys = HashSet<String>()
+            val notifResult = mutableListOf<BerandaNotificationCustomerItem>()
+
+            for (cust in segmenSource) {
                 val dailyCust = resolveBerandaDailyCustomer(cust, dailyDataMap)
-                if (dailyCust != null) {
+                val resolvedCust = if (dailyCust != null) {
                     cust.copy(
                         kolek = dailyCust.kolek.ifBlank { cust.kolek },
                         osPinjaman = dailyCust.osPinjaman,
@@ -755,232 +913,246 @@ fun BerandaScreenView(
                 } else {
                     cust
                 }
-            }
-        }
-    }
+                resolvedCustomers.add(resolvedCust)
 
-    val segmenKelolaanGroups = remember(kelolaanSegmenSource) {
-        kelolaanSegmenSource
-            .groupBy { it.segmen.trim().uppercase().ifBlank { "LAINNYA" } }
-            .map { (name, group) ->
-                Triple(name, group.sumOf { it.osPinjaman }, group.size)
-            }
-            .sortedByDescending { it.second }
-    }
-
-    val savingsMaxByNormCif = remember(di319Rows) {
-        val map = mutableMapOf<String, Double>()
-        for (row in di319Rows) {
-            val norm = normalizeBerandaCif(row.cif)
-            if (norm.isNotEmpty()) {
-                val prev = map[norm] ?: 0.0
-                if (row.saldo > prev) map[norm] = row.saldo
-            }
-        }
-        map
-    }
-
-    val (tusimData, tucilData, tunggakanUnder6Data) = remember(
-        kelolaanSegmenSource,
-        dailyDataMap,
-        savingsMaxByNormCif
-    ) {
-        val nowDate = LocalDate.now()
-        var tusimOs = 0.0
-        var tusimCount = 0
-        val tusimList = mutableListOf<BerandaAlertCustomerItem>()
-
-        var tucilOs = 0.0
-        var tucilCount = 0
-        val tucilList = mutableListOf<BerandaAlertCustomerItem>()
-
-        var tg6Os = 0.0
-        var tg6Count = 0
-        val tg6List = mutableListOf<BerandaAlertCustomerItem>()
-
-        for (cust in kelolaanSegmenSource) {
-            val dailyCust = resolveBerandaDailyCustomer(cust, dailyDataMap)
-            val currentTunggakan = dailyCust?.totalTunggakan ?: cust.totalTunggakan
-            val currentUmurTgk = dailyCust?.umurTgk ?: cust.umurTgk
-            val currentKolek = dailyCust?.kolek?.ifBlank { cust.kolek } ?: cust.kolek
-            val currentOs = dailyCust?.osPinjaman ?: cust.osPinjaman
-            val normCif = normalizeBerandaCif(cust.cif)
-            val savingsSaldo = if (normCif.isNotBlank()) savingsMaxByNormCif[normCif] ?: 0.0 else 0.0
-            val mantriLabel = cleanMantriNameOnly(cust.namaMantri).ifBlank { cust.namaMantri.trim() }
-
-            val rawTglReal = cust.tglReal.ifBlank {
-                cust.extraColumns.split("||")
-                    .firstOrNull { part ->
-                        part.startsWith("Tgl Real::", ignoreCase = true) ||
-                            part.startsWith("Tgl Realisasi::", ignoreCase = true) ||
-                            part.startsWith("TGL_REAL::", ignoreCase = true)
-                    }
-                    ?.substringAfter("::")
-                    ?.trim()
-                    ?: ""
-            }
-            val elapsedMonths = DateTenorUtils.monthsElapsedSince(rawTglReal, nowDate)
-
-            fun buildAlertItem(): BerandaAlertCustomerItem = BerandaAlertCustomerItem(
-                namaNasabah = cust.namaNasabah.trim().ifBlank { "Tanpa Nama" },
-                noRekening = cust.noRekening.trim(),
-                kolek = currentKolek.trim().ifBlank { "-" },
-                osPinjaman = currentOs,
-                totalTunggakan = currentTunggakan,
-                saldoTabungan = savingsSaldo,
-                umurTunggakanHari = currentUmurTgk,
-                lamaPinjamanBulan = elapsedMonths,
-                namaMantri = mantriLabel,
-                segmen = cust.segmen.trim()
-            )
-
-            if (currentTunggakan > 0.0) {
-                if (normCif.isNotBlank() && savingsSaldo > 25_000.0) {
-                    tusimOs += currentOs
-                    tusimCount++
-                    tusimList.add(buildAlertItem())
+                val segKey = cust.segmen.trim().uppercase().ifBlank { "LAINNYA" }
+                val prevSeg = segmenBuckets[segKey]
+                segmenBuckets[segKey] = if (prevSeg == null) {
+                    cust.osPinjaman to 1
+                } else {
+                    (prevSeg.first + cust.osPinjaman) to (prevSeg.second + 1)
                 }
-                if (currentTunggakan < 100_000.0) {
-                    tucilOs += currentOs
-                    tucilCount++
-                    tucilList.add(buildAlertItem())
+
+                val currentTunggakan = resolvedCust.totalTunggakan
+                val currentUmurTgk = resolvedCust.umurTgk
+                val currentKolek = resolvedCust.kolek
+                val currentOs = resolvedCust.osPinjaman
+                val normCif = normalizeBerandaCif(cust.cif)
+                val savingsSaldo = if (normCif.isNotBlank()) savingsMaxByNormCif[normCif] ?: 0.0 else 0.0
+                val mantriLabel = cleanMantriNameOnly(cust.namaMantri).ifBlank { cust.namaMantri.trim() }
+
+                val rawTglReal = cust.tglReal.ifBlank {
+                    cust.extraColumns.split("||")
+                        .firstOrNull { part ->
+                            part.startsWith("Tgl Real::", ignoreCase = true) ||
+                                part.startsWith("Tgl Realisasi::", ignoreCase = true) ||
+                                part.startsWith("TGL_REAL::", ignoreCase = true)
+                        }
+                        ?.substringAfter("::")
+                        ?.trim()
+                        ?: ""
                 }
-            }
+                val elapsedMonths = DateTenorUtils.monthsElapsedSince(rawTglReal, nowDate)
 
-            val hasArrears = currentTunggakan > 0.0 ||
-                currentUmurTgk > 0 ||
-                isNonLancarBerandaKolek(currentKolek)
-            if (hasArrears && elapsedMonths != null && elapsedMonths < 6) {
-                tg6Os += currentOs
-                tg6Count++
-                tg6List.add(buildAlertItem())
-            }
-        }
-
-        val itemComparator = compareByDescending<BerandaAlertCustomerItem> { it.totalTunggakan }
-            .thenByDescending { it.osPinjaman }
-            .thenBy { it.namaNasabah.lowercase() }
-
-        Triple(
-            BerandaAlertCategoryData(
-                summary = UnitSummaryData(os = tusimOs, debtors = tusimCount),
-                customers = tusimList.sortedWith(itemComparator)
-            ),
-            BerandaAlertCategoryData(
-                summary = UnitSummaryData(os = tucilOs, debtors = tucilCount),
-                customers = tucilList.sortedWith(itemComparator)
-            ),
-            BerandaAlertCategoryData(
-                summary = UnitSummaryData(os = tg6Os, debtors = tg6Count),
-                customers = tg6List.sortedWith(itemComparator)
-            )
-        )
-    }
-    val tusimSummary = tusimData.summary
-    val tucilSummary = tucilData.summary
-    val tunggakanUnder6Summary = tunggakanUnder6Data.summary
-
-    val notificationCustomers = remember(
-        kelolaanSegmenSource,
-        monitoringCustomers,
-        dailyDataMap,
-        kunjunganKeys
-    ) {
-        val todayDayOfMonth = LocalDate.now().dayOfMonth
-        val seenKeys = HashSet<String>()
-        val result = mutableListOf<BerandaNotificationCustomerItem>()
-
-        fun processCustomer(cust: CustomerEntity, allowDueToday: Boolean) {
-            val custKey = if (cust.noRekening.isNotBlank()) cust.noRekening else if (cust.cif.isNotBlank()) cust.cif else cust.namaNasabah
-            if (!seenKeys.add(custKey)) return
-
-            val npdDay = cust.npd.trim().toIntOrNull()
-                ?: cust.tglLunas.trim().split('/', '-', '.').firstOrNull()?.toIntOrNull()
-            val isDueToday = allowDueToday && npdDay == todayDayOfMonth
-            val isVisitPlanned = kunjunganKeys.contains(custKey)
-
-            if (!isDueToday && !isVisitPlanned) return
-
-            val dailyCust = resolveBerandaDailyCustomer(cust, dailyDataMap)
-            val currentTunggakan = dailyCust?.totalTunggakan ?: cust.totalTunggakan
-            val currentKolek = dailyCust?.kolek?.ifBlank { cust.kolek } ?: cust.kolek
-            val currentOs = dailyCust?.osPinjaman ?: cust.osPinjaman
-            val mantriLabel = cleanMantriNameOnly(cust.namaMantri).ifBlank { cust.namaMantri.trim() }
-
-            result.add(
-                BerandaNotificationCustomerItem(
+                fun buildAlertItem(): BerandaAlertCustomerItem = BerandaAlertCustomerItem(
                     namaNasabah = cust.namaNasabah.trim().ifBlank { "Tanpa Nama" },
                     noRekening = cust.noRekening.trim(),
                     kolek = currentKolek.trim().ifBlank { "-" },
                     osPinjaman = currentOs,
                     totalTunggakan = currentTunggakan,
-                    npd = cust.npd.trim().ifBlank { npdDay?.toString() ?: "" },
+                    saldoTabungan = savingsSaldo,
+                    umurTunggakanHari = currentUmurTgk,
+                    lamaPinjamanBulan = elapsedMonths,
                     namaMantri = mantriLabel,
-                    segmen = cust.segmen.trim(),
-                    isJatuhTempo = isDueToday,
-                    isKunjungan = isVisitPlanned
+                    segmen = cust.segmen.trim()
                 )
+
+                if (currentTunggakan > 0.0) {
+                    if (normCif.isNotBlank() && savingsSaldo > 25_000.0) {
+                        tusimOs += currentOs
+                        tusimCount++
+                        tusimList.add(buildAlertItem())
+                    }
+                    if (currentTunggakan < 100_000.0) {
+                        tucilOs += currentOs
+                        tucilCount++
+                        tucilList.add(buildAlertItem())
+                    }
+                }
+
+                val hasArrears = currentTunggakan > 0.0 ||
+                    currentUmurTgk > 0 ||
+                    isNonLancarBerandaKolek(currentKolek)
+                if (hasArrears && elapsedMonths != null && elapsedMonths < 6) {
+                    tg6Os += currentOs
+                    tg6Count++
+                    tg6List.add(buildAlertItem())
+                }
+
+                // Notification evaluation (within active scope)
+                val custKey = if (cust.noRekening.isNotBlank()) cust.noRekening else if (cust.cif.isNotBlank()) cust.cif else cust.namaNasabah
+                if (seenNotifKeys.add(custKey)) {
+                    val npdDay = cust.npd.trim().toIntOrNull()
+                        ?: cust.tglLunas.trim().split('/', '-', '.').firstOrNull()?.toIntOrNull()
+                    val isDueToday = npdDay == todayDayOfMonth
+                    val isVisitPlanned = kunjunganKeys.contains(custKey)
+                    if (isDueToday || isVisitPlanned) {
+                        notifResult.add(
+                            BerandaNotificationCustomerItem(
+                                namaNasabah = cust.namaNasabah.trim().ifBlank { "Tanpa Nama" },
+                                noRekening = cust.noRekening.trim(),
+                                kolek = currentKolek.trim().ifBlank { "-" },
+                                osPinjaman = currentOs,
+                                totalTunggakan = currentTunggakan,
+                                npd = cust.npd.trim().ifBlank { npdDay?.toString() ?: "" },
+                                namaMantri = mantriLabel,
+                                segmen = cust.segmen.trim(),
+                                isJatuhTempo = isDueToday,
+                                isKunjungan = isVisitPlanned
+                            )
+                        )
+                    }
+                }
+            }
+
+            if (kunjunganKeys.isNotEmpty()) {
+                for (cust in monitoringCustomers) {
+                    val custKey = if (cust.noRekening.isNotBlank()) cust.noRekening else if (cust.cif.isNotBlank()) cust.cif else cust.namaNasabah
+                    if (!seenNotifKeys.add(custKey)) continue
+                    if (!kunjunganKeys.contains(custKey)) continue
+
+                    val dailyCust = resolveBerandaDailyCustomer(cust, dailyDataMap)
+                    val currentTunggakan = dailyCust?.totalTunggakan ?: cust.totalTunggakan
+                    val currentKolek = dailyCust?.kolek?.ifBlank { cust.kolek } ?: cust.kolek
+                    val currentOs = dailyCust?.osPinjaman ?: cust.osPinjaman
+                    val mantriLabel = cleanMantriNameOnly(cust.namaMantri).ifBlank { cust.namaMantri.trim() }
+                    val npdDay = cust.npd.trim().toIntOrNull()
+                        ?: cust.tglLunas.trim().split('/', '-', '.').firstOrNull()?.toIntOrNull()
+
+                    notifResult.add(
+                        BerandaNotificationCustomerItem(
+                            namaNasabah = cust.namaNasabah.trim().ifBlank { "Tanpa Nama" },
+                            noRekening = cust.noRekening.trim(),
+                            kolek = currentKolek.trim().ifBlank { "-" },
+                            osPinjaman = currentOs,
+                            totalTunggakan = currentTunggakan,
+                            npd = cust.npd.trim().ifBlank { npdDay?.toString() ?: "" },
+                            namaMantri = mantriLabel,
+                            segmen = cust.segmen.trim(),
+                            isJatuhTempo = false,
+                            isKunjungan = true
+                        )
+                    )
+                }
+            }
+
+            val itemComparator = compareByDescending<BerandaAlertCustomerItem> { it.totalTunggakan }
+                .thenByDescending { it.osPinjaman }
+                .thenBy { it.namaNasabah.lowercase() }
+
+            val sortedSegmen = segmenBuckets.entries
+                .map { (name, pair) -> Triple(name, pair.first, pair.second) }
+                .sortedByDescending { it.second }
+
+            val sortedNotifications = notifResult.sortedWith(
+                compareByDescending<BerandaNotificationCustomerItem> { it.isKunjungan && it.isJatuhTempo }
+                    .thenByDescending { it.isKunjungan }
+                    .thenByDescending { it.totalTunggakan }
+                    .thenByDescending { it.osPinjaman }
+                    .thenBy { it.namaNasabah.lowercase() }
+            )
+
+            BerandaPortfolioDerived(
+                kelolaanSegmenSource = segmenSource,
+                resolvedBerandaCustomers = resolvedCustomers,
+                segmenKelolaanGroups = sortedSegmen,
+                tusimData = BerandaAlertCategoryData(
+                    summary = UnitSummaryData(os = tusimOs, debtors = tusimCount),
+                    customers = tusimList.sortedWith(itemComparator)
+                ),
+                tucilData = BerandaAlertCategoryData(
+                    summary = UnitSummaryData(os = tucilOs, debtors = tucilCount),
+                    customers = tucilList.sortedWith(itemComparator)
+                ),
+                tunggakanUnder6Data = BerandaAlertCategoryData(
+                    summary = UnitSummaryData(os = tg6Os, debtors = tg6Count),
+                    customers = tg6List.sortedWith(itemComparator)
+                ),
+                notificationCustomers = sortedNotifications
             )
         }
 
-        for (cust in kelolaanSegmenSource) {
-            processCustomer(cust, allowDueToday = true)
-        }
-        if (kunjunganKeys.isNotEmpty()) {
-            for (cust in monitoringCustomers) {
-                processCustomer(cust, allowDueToday = false)
-            }
-        }
-
-        result.sortedWith(
-            compareByDescending<BerandaNotificationCustomerItem> { it.isKunjungan && it.isJatuhTempo }
-                .thenByDescending { it.isKunjungan }
-                .thenByDescending { it.totalTunggakan }
-                .thenByDescending { it.osPinjaman }
-                .thenBy { it.namaNasabah.lowercase() }
+        cachedPortfolioEntry = BerandaPortfolioCacheEntry(
+            monitoring = monitoringCustomers,
+            daily = dailyCustomers,
+            akhir = akhirBulanCustomers,
+            kelolaanCustomers = kelolaanCustomers,
+            dailyDataMap = dailyDataMap,
+            di319Rows = di319Rows,
+            kunjunganKeys = kunjunganKeys,
+            loggedInPN = loggedInPN,
+            cleanPnDigits = cleanPnDigits,
+            displayName = displayName,
+            effectiveScope = effectiveScope,
+            result = computed
         )
+        value = computed
     }
+
+    val resolvedBerandaCustomers = portfolioDerived.resolvedBerandaCustomers
+    val segmenKelolaanGroups = portfolioDerived.segmenKelolaanGroups
+    val tusimData = portfolioDerived.tusimData
+    val tucilData = portfolioDerived.tucilData
+    val tunggakanUnder6Data = portfolioDerived.tunggakanUnder6Data
+    val tusimSummary = tusimData.summary
+    val tucilSummary = tucilData.summary
+    val tunggakanUnder6Summary = tunggakanUnder6Data.summary
+    val notificationCustomers = portfolioDerived.notificationCustomers
 
     val bellBadgeCount = notificationCustomers.size +
         (if (hasUpdateAvailable) 1 else 0) +
         (if (isShowingCachedOfflineData) 1 else 0)
 
+    val bgBitmap by produceState<ImageBitmap?>(initialValue = cachedBerandaBgBitmap, context) {
+        if (value != null) return@produceState
+        val loaded = withContext(Dispatchers.IO) {
+            val resId = context.resources.getIdentifier("bg_beranda", "drawable", context.packageName)
+            if (resId != 0) {
+                runCatching {
+                    BitmapFactory.decodeResource(context.resources, resId)?.asImageBitmap()
+                }.getOrNull()
+            } else {
+                null
+            }
+        }
+        if (loaded != null) {
+            cachedBerandaBgBitmap = loaded
+            value = loaded
+        }
+    }
+
     Box(
         modifier = modifier.fillMaxSize()
     ) {
-        // Full-bleed custom wallpaper background (resolved safely with gradient fallback)
-        val bgResId = remember(context) {
-            context.resources.getIdentifier("bg_beranda", "drawable", context.packageName)
+        // Lightweight base gradient + async cached wallpaper background for zero-jank frame 1 transition
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(Color(0xFFEDF3FC))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(320.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF003B8E),
+                                Color(0xFF005EC4),
+                                Color(0xFF0F7EE6)
+                            )
+                        )
+                    )
+            )
         }
-        if (bgResId != 0) {
+        bgBitmap?.let { bitmap ->
             Image(
-                painter = painterResource(id = bgResId),
+                bitmap = bitmap,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 alignment = Alignment.TopCenter,
                 modifier = Modifier.matchParentSize()
             )
-        } else {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(Color(0xFFEDF3FC))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(320.dp)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color(0xFF003B8E),
-                                    Color(0xFF005EC4),
-                                    Color(0xFF0F7EE6)
-                                )
-                            )
-                        )
-                )
-            }
         }
 
         Column(
@@ -1214,18 +1386,39 @@ fun BerandaScreenView(
                             modifier = Modifier.size(22.dp)
                         )
                     }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Rencana Kunjungan",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF7C2D12)
-                        )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Rencana Kunjungan",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF7C2D12),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 6.dp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (loggedInPN.isNotBlank()) {
+                                BerandaDebtorCountBadge(
+                                    countText = formatter.format(kunjunganKeys.size),
+                                    accentColor = if (kunjunganKeys.isNotEmpty()) Color(0xFFEA580C) else Color(0xFF94A3B8),
+                                    contentDescription = "Total Nasabah Kunjungan"
+                                )
+                            }
+                        }
                         Text(
                             text = if (loggedInPN.isBlank()) {
                                 "Login PN untuk mengelola rencana kunjungan"
                             } else {
-                                "${kunjunganKeys.size} Nasabah • Tgl $activeVisitDateStr"
+                                "Tgl $activeVisitDateStr"
                             },
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.Medium,
@@ -1309,24 +1502,11 @@ fun BerandaScreenView(
                                 overflow = TextOverflow.Ellipsis
                             )
                             if (loggedInPN.isNotBlank()) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Person,
-                                        contentDescription = "Debitur",
-                                        tint = Color(0xFF005FAF),
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                    Text(
-                                        text = formatter.format(kelolaanActiveSummary.debtors),
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF005FAF),
-                                        maxLines = 1
-                                    )
-                                }
+                                BerandaDebtorCountBadge(
+                                    countText = formatter.format(kelolaanActiveSummary.debtors),
+                                    accentColor = if (kelolaanActiveSummary.debtors > 0) Color(0xFF005FAF) else Color(0xFF94A3B8),
+                                    contentDescription = "Total Nasabah Kelolaan"
+                                )
                             }
                         }
                         val kelolaanSubtitle = if (loggedInPN.isBlank()) {
@@ -1417,31 +1597,12 @@ fun BerandaScreenView(
                                 )
                             }
 
-                            Surface(
-                                shape = RoundedCornerShape(999.dp),
-                                color = if (kualitasTotalDeb > 0) Color(0xFF005FAF) else Color(0xFF94A3B8),
+                            BerandaDebtorCountBadge(
+                                countText = formatter.format(kualitasTotalDeb),
+                                accentColor = if (kualitasTotalDeb > 0) Color(0xFF005FAF) else Color(0xFF94A3B8),
+                                contentDescription = "Total Data Kualitas",
                                 modifier = Modifier.testTag("beranda_badge_kualitas")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Person,
-                                        contentDescription = "Total Data Kualitas",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(10.dp)
-                                    )
-                                    Text(
-                                        text = formatter.format(kualitasTotalDeb),
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = Color.White,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
@@ -1452,7 +1613,7 @@ fun BerandaScreenView(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "NPL ${String.format(Locale.US, "%.1f", nplOsPct)}% • Lcr ${String.format(Locale.US, "%.1f", lancarOsPct)}%",
+                                text = "SML ${String.format(Locale.US, "%.1f", smlOsPct)}% • NPL ${String.format(Locale.US, "%.1f", nplOsPct)}%",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF475569),
@@ -1523,20 +1684,12 @@ fun BerandaScreenView(
                                 )
                             }
 
-                            Surface(
-                                shape = RoundedCornerShape(999.dp),
-                                color = if (segmenTotalCount > 0) Color(0xFF4338CA) else Color(0xFF94A3B8),
+                            BerandaDebtorCountBadge(
+                                countText = formatter.format(segmenTotalDeb),
+                                accentColor = if (segmenTotalDeb > 0) Color(0xFF4338CA) else Color(0xFF94A3B8),
+                                contentDescription = "Total Data Segmen",
                                 modifier = Modifier.testTag("beranda_badge_segmen")
-                            ) {
-                                Text(
-                                    text = formatter.format(segmenTotalCount),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                                )
-                            }
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
@@ -1547,7 +1700,7 @@ fun BerandaScreenView(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "${formatter.format(segmenTotalDeb)} Nasabah • ${effectiveScope.label}",
+                                text = "${formatter.format(segmenTotalCount)} Segmen • ${effectiveScope.label}",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF475569),
@@ -1607,12 +1760,13 @@ fun BerandaScreenView(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(IntrinsicSize.Max),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     BerandaAlertMiniCard(
                         title = "Tusim",
                         osText = formatFullIdr(tusimSummary.os, formatter),
                         debText = formatter.format(tusimSummary.debtors),
+                        hasDebtors = tusimSummary.debtors > 0,
                         accentColor = Color(0xFF0F766E),
                         containerColor = Color(0xFFF0FDFA),
                         borderColor = Color(0xFF99F6E4),
@@ -1626,6 +1780,7 @@ fun BerandaScreenView(
                         title = "Tucil <100 rb",
                         osText = formatFullIdr(tucilSummary.os, formatter),
                         debText = formatter.format(tucilSummary.debtors),
+                        hasDebtors = tucilSummary.debtors > 0,
                         accentColor = Color(0xFFC2410C),
                         containerColor = Color(0xFFFFF7ED),
                         borderColor = Color(0xFFFED7AA),
@@ -1639,6 +1794,7 @@ fun BerandaScreenView(
                         title = "Tunggakan <6 bln",
                         osText = formatFullIdr(tunggakanUnder6Summary.os, formatter),
                         debText = formatter.format(tunggakanUnder6Summary.debtors),
+                        hasDebtors = tunggakanUnder6Summary.debtors > 0,
                         accentColor = Color(0xFFBE123C),
                         containerColor = Color(0xFFFFF1F2),
                         borderColor = Color(0xFFFECDD3),
@@ -2014,13 +2170,14 @@ private fun RealisasiBarChartCard(
                 }
 
                 // Borderless Top Metrics: Realisasi (belakang) & Netdisburse (depan)
-                Row(
+                // Info debitur dan % dari Realisasi berada di sebelah kanan info angkanya
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Column(
                         modifier = Modifier
-                            .weight(1f)
+                            .fillMaxWidth()
                             .testTag("chart_metric_realisasi"),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
@@ -2042,39 +2199,52 @@ private fun RealisasiBarChartCard(
                                 maxLines = 1
                             )
                         }
-                        val realText = formatFullIdr(totalRealisasi, formatter)
-                        Text(
-                            text = realText,
-                            fontSize = adaptiveOsFontSize(realText, maxSp = 12.5f),
-                            letterSpacing = (-0.25).sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
                         Row(
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = "Debitur",
-                                tint = Color(0xFFBAE6FD),
-                                modifier = Modifier.size(11.dp)
-                            )
+                            val realText = formatFullIdr(totalRealisasi, formatter)
                             Text(
-                                text = "${formatter.format(totalDeb)} Debitur",
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFFBAE6FD),
-                                maxLines = 1
+                                text = realText,
+                                fontSize = adaptiveOsFontSize(realText, maxSp = 14f),
+                                letterSpacing = (-0.25).sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = Color.White.copy(alpha = 0.14f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Person,
+                                        contentDescription = "Debitur",
+                                        tint = Color(0xFFBAE6FD),
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Text(
+                                        text = "${formatter.format(totalDeb)} Debitur",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFE0F2FE),
+                                        maxLines = 1
+                                    )
+                                }
+                            }
                         }
                     }
 
                     Column(
                         modifier = Modifier
-                            .weight(1f)
+                            .fillMaxWidth()
                             .testTag("chart_metric_netdisburs"),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
@@ -2095,24 +2265,37 @@ private fun RealisasiBarChartCard(
                                 maxLines = 1
                             )
                         }
-                        val netText = formatSignedFullIdr(totalNetDisburs, formatter)
-                        Text(
-                            text = netText,
-                            fontSize = adaptiveOsFontSize(netText, maxSp = 12.5f),
-                            letterSpacing = (-0.25).sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFFA7F3D0),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "${String.format(Locale.US, "%.1f", netRatioPct)}% dari Realisasi",
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF6EE7B7),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val netText = formatSignedFullIdr(totalNetDisburs, formatter)
+                            Text(
+                                text = netText,
+                                fontSize = adaptiveOsFontSize(netText, maxSp = 14f),
+                                letterSpacing = (-0.25).sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFFA7F3D0),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.22f)
+                            ) {
+                                Text(
+                                    text = "${String.format(Locale.US, "%.1f", netRatioPct)}% dari Realisasi",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFA7F3D0),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -3402,7 +3585,7 @@ private fun PantauanCustomerCard(
 ) {
     val metaParts = buildList {
         if (item.noRekening.isNotBlank()) add(item.noRekening)
-        if (item.kolek.isNotBlank() && item.kolek != "-") add("Kolek ${item.kolek}")
+        if (item.kolek.isNotBlank() && item.kolek != "-") add(item.kolek)
         if (item.segmen.isNotBlank()) add(item.segmen)
         if (showMantriName && item.namaMantri.isNotBlank() && item.namaMantri != "Blank PN") {
             add(item.namaMantri)
@@ -4082,7 +4265,7 @@ private fun NotifikasiCustomerCard(
 ) {
     val metaParts = buildList {
         if (item.noRekening.isNotBlank()) add(item.noRekening)
-        if (item.kolek.isNotBlank() && item.kolek != "-") add("Kolek ${item.kolek}")
+        if (item.kolek.isNotBlank() && item.kolek != "-") add(item.kolek)
         if (item.segmen.isNotBlank()) add(item.segmen)
         if (showMantriName && item.namaMantri.isNotBlank() && item.namaMantri != "Blank PN") {
             add(item.namaMantri)
@@ -4820,10 +5003,49 @@ private fun HealthMetricSummaryHeader(
 }
 
 @Composable
+private fun BerandaDebtorCountBadge(
+    countText: String,
+    accentColor: Color,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    iconSize: Dp = 10.dp,
+    fontSize: TextUnit = 10.sp,
+    horizontalPadding: Dp = 6.dp,
+    verticalPadding: Dp = 2.dp
+) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = accentColor,
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = horizontalPadding, vertical = verticalPadding),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Person,
+                contentDescription = contentDescription,
+                tint = Color.White,
+                modifier = Modifier.size(iconSize)
+            )
+            Text(
+                text = countText,
+                fontSize = fontSize,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
 private fun BerandaAlertMiniCard(
     title: String,
     osText: String,
     debText: String,
+    hasDebtors: Boolean,
     accentColor: Color,
     containerColor: Color,
     borderColor: Color,
@@ -4832,7 +5054,7 @@ private fun BerandaAlertMiniCard(
 ) {
     Surface(
         modifier = modifier
-            .heightIn(min = 66.dp)
+            .heightIn(min = 78.dp)
             .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
@@ -4842,48 +5064,32 @@ private fun BerandaAlertMiniCard(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 7.dp, vertical = 8.dp),
+                .padding(horizontal = 7.dp, vertical = 9.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
-                Text(
-                    text = title,
-                    fontSize = 9.sp,
-                    lineHeight = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = accentColor,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 2.dp)
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(1.5.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "Debitur",
-                        tint = accentColor,
-                        modifier = Modifier.size(10.5.dp)
-                    )
-                    Text(
-                        text = debText,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF334155),
-                        maxLines = 1
-                    )
-                }
-            }
+            Text(
+                text = title,
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = accentColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            BerandaDebtorCountBadge(
+                countText = debText,
+                accentColor = if (hasDebtors) accentColor else Color(0xFF94A3B8),
+                contentDescription = "Debitur $title",
+                iconSize = 11.dp,
+                fontSize = 11.sp,
+                horizontalPadding = 7.dp,
+                verticalPadding = 2.5.dp
+            )
+
             Text(
                 text = osText,
-                fontSize = adaptiveOsFontSize(osText, maxSp = 10f),
+                fontSize = adaptiveOsFontSize(osText, maxSp = 11.8f),
                 letterSpacing = (-0.3).sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color(0xFF0F172A),

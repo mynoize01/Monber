@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -87,13 +88,18 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import com.example.R
+import com.example.ui.components.ActiveDateRangeBanner
 import com.example.ui.components.AnimatedFadeSlideDialog
 import com.example.ui.components.BriWaveHeaderBackground
 import com.example.ui.components.CurvedAnimatedBottomBar
+import com.example.ui.components.CustomerDateField
+import com.example.ui.components.DateRangeFilterDialog
 import com.example.ui.components.HeaderPocketSearchBar
 import com.example.ui.components.HeaderPocketSearchButton
 import com.example.ui.components.LazyLoadingFooterRow
 import com.example.ui.components.PnLoginPopupDialog
+import com.example.ui.components.filterCustomersByDateRange
+import com.example.ui.components.formatDateRangeSummary
 import com.example.ui.components.rememberLazyPagedItems
 import com.example.ui.components.TableLiquidSearchBar
 import com.example.data.model.CustomerEntity
@@ -505,6 +511,13 @@ fun DashboardScreen(
     val filterTucil by viewModel.filterTucil.collectAsState()
     val filterTunggakanKurang6Bln by viewModel.filterTunggakanKurang6Bln.collectAsState()
     val filterDesa by viewModel.filterDesa.collectAsState()
+    val filterDateRangeField by viewModel.filterDateRangeField.collectAsState()
+    val filterDateRangeStart by viewModel.filterDateRangeStart.collectAsState()
+    val filterDateRangeEnd by viewModel.filterDateRangeEnd.collectAsState()
+    val activeDateField = remember(filterDateRangeField) { CustomerDateField.fromKey(filterDateRangeField) }
+    val activeDateStart = remember(filterDateRangeStart) { DateTenorUtils.parseIsoLocalDate(filterDateRangeStart) }
+    val activeDateEnd = remember(filterDateRangeEnd) { DateTenorUtils.parseIsoLocalDate(filterDateRangeEnd) }
+    val isDateRangeActive = activeDateStart != null || activeDateEnd != null
     val availableNpds by viewModel.availableNpds.collectAsState()
     val customersList by viewModel.customersList.collectAsState()
     val availableMantris by viewModel.availableMantris.collectAsState()
@@ -565,6 +578,7 @@ fun DashboardScreen(
     var showConfirmLogoff by remember { mutableStateOf(false) }
     var showTusimPopup by remember { mutableStateOf(false) }
     var showNpdMultiSelectDialog by remember { mutableStateOf(false) }
+    var showDateRangeFilterDialog by remember { mutableStateOf(false) }
     val customSpreadsheetUrl by viewModel.customSpreadsheetUrl.collectAsState()
     val url1 by viewModel.url1.collectAsState()
     val url2 by viewModel.url2.collectAsState()
@@ -1013,19 +1027,15 @@ fun DashboardScreen(
                     targetState = currentShellMode,
                     transitionSpec = {
                         val isForward = shellOrderIndex(targetState) >= shellOrderIndex(initialState)
-                        val slideSpring = spring<IntOffset>(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessMediumLow,
-                            visibilityThreshold = IntOffset.VisibilityThreshold
-                        )
-                        slideInHorizontally(
-                            animationSpec = slideSpring,
-                            initialOffsetX = { fullWidth -> if (isForward) fullWidth else -fullWidth }
-                        ) togetherWith slideOutHorizontally(
-                            animationSpec = slideSpring,
-                            targetOffsetX = { fullWidth -> if (isForward) -fullWidth else fullWidth }
+                        (fadeIn(
+                            animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing)
+                        ) + slideInHorizontally(
+                            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+                            initialOffsetX = { fullWidth -> (if (isForward) 1 else -1) * (fullWidth / 14) }
+                        )) togetherWith fadeOut(
+                            animationSpec = tween(durationMillis = 100, easing = FastOutLinearInEasing)
                         ) using SizeTransform(
-                            clip = true,
+                            clip = false,
                             sizeAnimationSpec = { _, _ -> snap() }
                         )
                     },
@@ -1125,19 +1135,15 @@ fun DashboardScreen(
                                         targetState = activeSharedNavState.value,
                                         transitionSpec = {
                                             val isForward = navOrderIndex(targetState) >= navOrderIndex(initialState)
-                                            val bodySlideSpring = spring<IntOffset>(
-                                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                                stiffness = Spring.StiffnessMediumLow,
-                                                visibilityThreshold = IntOffset.VisibilityThreshold
-                                            )
-                                            slideInHorizontally(
-                                                animationSpec = bodySlideSpring,
-                                                initialOffsetX = { fullWidth -> if (isForward) fullWidth else -fullWidth }
-                                            ) togetherWith slideOutHorizontally(
-                                                animationSpec = bodySlideSpring,
-                                                targetOffsetX = { fullWidth -> if (isForward) -fullWidth else fullWidth }
+                                            (fadeIn(
+                                                animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing)
+                                            ) + slideInHorizontally(
+                                                animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+                                                initialOffsetX = { fullWidth -> (if (isForward) 1 else -1) * (fullWidth / 14) }
+                                            )) togetherWith fadeOut(
+                                                animationSpec = tween(durationMillis = 100, easing = FastOutLinearInEasing)
                                             ) using SizeTransform(
-                                                clip = true,
+                                                clip = false,
                                                 sizeAnimationSpec = { _, _ -> snap() }
                                             )
                                         },
@@ -1270,6 +1276,27 @@ fun DashboardScreen(
                             modifier = Modifier.weight(1f)
                         )
 
+                        if (selectedMenu != "SIMPANAN") {
+                            Box(
+                                modifier = Modifier.height(34.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                IconButton(
+                                    onClick = { showDateRangeFilterDialog = true },
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .testTag("dashboard_date_range_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DateRange,
+                                        contentDescription = "Filter rentang tanggal",
+                                        tint = if (isDateRangeActive) Color(0xFFFF7043) else Color(0xFF005FAF),
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+                            }
+                        }
+
                         // Filter toggle button aligned cleanly with the 34.dp pill bar
                         Box(
                             modifier = Modifier.height(34.dp),
@@ -1297,6 +1324,19 @@ fun DashboardScreen(
                                 )
                             }
                         }
+                    }
+
+                    if (selectedMenu != "SIMPANAN" && isDateRangeActive) {
+                        ActiveDateRangeBanner(
+                            field = activeDateField,
+                            startDate = activeDateStart,
+                            endDate = activeDateEnd,
+                            resultCount = customersList.size,
+                            accentColor = Color(0xFF005FAF),
+                            onEditClick = { showDateRangeFilterDialog = true },
+                            onClearClick = { viewModel.clearDateRangeFilter() },
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
                     }
 
                     // Popup Search Results for KUNJUNGAN menu
@@ -1535,7 +1575,8 @@ fun DashboardScreen(
                                 filterSetorPokok ||
                                 filterTusim ||
                                 filterTucil ||
-                                filterTunggakanKurang6Bln
+                                filterTunggakanKurang6Bln ||
+                                isDateRangeActive
  
                         // 1. Filter Mantri OR 3 Toggle Switches + Desa (If Kelolaan Menu)
                         if (selectedMenu == "KELOLAAN") {
@@ -1950,6 +1991,63 @@ fun DashboardScreen(
                             }
                         }
 
+                        // Rentang Tanggal Filter Bar (Real-time)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedButton(
+                                onClick = { showDateRangeFilterDialog = true },
+                                shape = RoundedCornerShape(16.dp),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (isDateRangeActive) Color(0xFFFF7043) else Color(0xFF005FAF).copy(alpha = 0.45f)
+                                ),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (isDateRangeActive) Color(0xFFFF7043).copy(alpha = 0.10f) else Color.White,
+                                    contentColor = if (isDateRangeActive) Color(0xFFE65100) else Color(0xFF005FAF)
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(32.dp)
+                                    .testTag("filter_panel_date_range_button"),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DateRange,
+                                    contentDescription = "Pilih rentang tanggal",
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (isDateRangeActive) {
+                                        "${activeDateField.shortLabel}: ${formatDateRangeSummary(activeDateStart, activeDateEnd)}"
+                                    } else {
+                                        "Filter Rentang Tanggal (${activeDateField.shortLabel})"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (isDateRangeActive) {
+                                IconButton(
+                                    onClick = { viewModel.clearDateRangeFilter() },
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .testTag("filter_panel_date_range_clear")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Hapus rentang tanggal",
+                                        tint = Color(0xFFD32F2F),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+
                         if (selectedMenu != "KUNJUNGAN") {
                             // 3. Filter OS, Filter Plafond, Filter Tenor, Geser Kolek (4 Kolom sejajar secara horizontal untuk Kelolaan & Intrakomp)
                             Row(
@@ -2043,6 +2141,7 @@ fun DashboardScreen(
                                     viewModel.filterTucil.value = false
                                     viewModel.filterTunggakanKurang6Bln.value = false
                                     viewModel.filterDesa.value = "SEMUA"
+                                    viewModel.clearDateRangeFilter()
                                 },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (hasActiveFilters) Color(0xFFD32F2F) else Color.White,
@@ -2082,7 +2181,8 @@ fun DashboardScreen(
                     filterSetorPokok ||
                     filterTusim ||
                     filterTucil ||
-                    filterTunggakanKurang6Bln)
+                    filterTunggakanKurang6Bln ||
+                    isDateRangeActive)
 
             if (hasActiveFilters && !showFilterPanel) {
                 Text(
@@ -2111,6 +2211,7 @@ fun DashboardScreen(
                             viewModel.filterTusim.value = false
                             viewModel.filterTucil.value = false
                             viewModel.filterTunggakanKurang6Bln.value = false
+                            viewModel.clearDateRangeFilter()
                         }
                 )
             }
@@ -6304,6 +6405,41 @@ fun DashboardScreen(
                 }
             }
         }
+    }
+
+    if (showDateRangeFilterDialog) {
+        val dateFilterBaseCustomers = remember(allCustomers, selectedMenu, loggedInPN) {
+            when (selectedMenu) {
+                "INTRAKOMP" -> allCustomers.filter { it.menuType == "INTRAKOMP" }
+                "KELOLAAN", "KUNJUNGAN" -> allCustomers.filter {
+                    it.menuType == "INTRAKOMP" && (
+                        loggedInPN.isBlank() ||
+                            it.pnMantri.trim() == loggedInPN.trim() ||
+                            it.namaMantri.contains(loggedInPN, ignoreCase = true)
+                    )
+                }
+                "EKSTRAKOMP" -> allCustomers.filter { it.menuType == "EKSTRAKOMP" }
+                else -> allCustomers
+            }
+        }
+        DateRangeFilterDialog(
+            initialField = activeDateField,
+            initialStartDate = activeDateStart,
+            initialEndDate = activeDateEnd,
+            accentColor = Color(0xFF005FAF),
+            countProvider = { field, start, end ->
+                filterCustomersByDateRange(dateFilterBaseCustomers, field, start, end).size
+            },
+            onApply = { field, start, end ->
+                viewModel.setDateRangeFilter(
+                    fieldKey = field.key,
+                    startIso = start?.toString() ?: "",
+                    endIso = end?.toString() ?: ""
+                )
+                showDateRangeFilterDialog = false
+            },
+            onDismiss = { showDateRangeFilterDialog = false }
+        )
     }
 
     if (showNpdMultiSelectDialog) {
