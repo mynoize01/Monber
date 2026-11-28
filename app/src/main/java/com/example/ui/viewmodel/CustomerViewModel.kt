@@ -77,10 +77,7 @@ data class ToggleFilters(
     val tuc: Boolean,
     val tg6: Boolean,
     val jt: Boolean,
-    val jtH: Int = 0,
-    val dateField: String = "TGL_REAL",
-    val dateStart: String = "",
-    val dateEnd: String = ""
+    val jtH: Int = 0
 )
 
 data class CustomerListMetadata(
@@ -110,10 +107,7 @@ data class FilterParams(
     val tunggakanKurang6Bln: Boolean = false,
     val jatuhTempoOnly: Boolean = false,
     val jatuhTempoH: Int = 0,
-    val desa: String = "SEMUA",
-    val dateRangeField: String = "TGL_REAL",
-    val dateRangeStart: String = "",
-    val dateRangeEnd: String = ""
+    val desa: String = "SEMUA"
 )
 
 const val DEFAULT_WA_DETAIL_TEMPLATE = """Selamat siang Bapak/Ibu *{nama},*
@@ -2222,9 +2216,6 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             .putBoolean("filter_${menu}_jt_only", filters.jatuhTempoOnly)
             .putInt("filter_${menu}_jt_h", filters.jatuhTempoH)
             .putString("filter_${menu}_desa", filters.desa)
-            .putString("filter_${menu}_date_field", filters.dateRangeField)
-            .putString("filter_${menu}_date_start", filters.dateRangeStart)
-            .putString("filter_${menu}_date_end", filters.dateRangeEnd)
             .apply()
     }
 
@@ -2249,10 +2240,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             tunggakanKurang6Bln = sharedPrefs.getBoolean("filter_${menu}_tg_kurang_6_bln", false),
             jatuhTempoOnly = sharedPrefs.getBoolean("filter_${menu}_jt_only", false),
             jatuhTempoH = sharedPrefs.getInt("filter_${menu}_jt_h", 0),
-            desa = sharedPrefs.getString("filter_${menu}_desa", "SEMUA") ?: "SEMUA",
-            dateRangeField = sharedPrefs.getString("filter_${menu}_date_field", "TGL_REAL") ?: "TGL_REAL",
-            dateRangeStart = sharedPrefs.getString("filter_${menu}_date_start", "") ?: "",
-            dateRangeEnd = sharedPrefs.getString("filter_${menu}_date_end", "") ?: ""
+            desa = sharedPrefs.getString("filter_${menu}_desa", "SEMUA") ?: "SEMUA"
         )
     }
 
@@ -2283,20 +2271,6 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
     val filterJatuhTempoOnly = MutableStateFlow(initialFilters.jatuhTempoOnly)
     val selectedJatuhTempoH = MutableStateFlow(initialFilters.jatuhTempoH)
     val filterDesa = MutableStateFlow(initialFilters.desa)
-    val filterDateRangeField = MutableStateFlow(initialFilters.dateRangeField)
-    val filterDateRangeStart = MutableStateFlow(initialFilters.dateRangeStart)
-    val filterDateRangeEnd = MutableStateFlow(initialFilters.dateRangeEnd)
-
-    fun setDateRangeFilter(fieldKey: String, startIso: String, endIso: String) {
-        filterDateRangeField.value = fieldKey
-        filterDateRangeStart.value = startIso
-        filterDateRangeEnd.value = endIso
-    }
-
-    fun clearDateRangeFilter() {
-        filterDateRangeStart.value = ""
-        filterDateRangeEnd.value = ""
-    }
 
     val sortColumn = MutableStateFlow(
         try {
@@ -2360,19 +2334,15 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             combine(filterSetorPokok, filterTusim, filterTucil, filterTunggakanKurang6Bln) { sp, tus, tuc, tg6 ->
                 listOf(sp, tus, tuc, tg6)
             },
-            combine(filterJatuhTempoOnly, selectedJatuhTempoH) { jt, jh -> jt to jh },
-            combine(filterDateRangeField, filterDateRangeStart, filterDateRangeEnd) { df, ds, de -> Triple(df, ds, de) }
-        ) { toggles, jtPair, dateRangeTriple ->
+            combine(filterJatuhTempoOnly, selectedJatuhTempoH) { jt, jh -> jt to jh }
+        ) { toggles, jtPair ->
             ToggleFilters(
                 sp = toggles[0],
                 tus = toggles[1],
                 tuc = toggles[2],
                 tg6 = toggles[3],
                 jt = jtPair.first,
-                jtH = jtPair.second,
-                dateField = dateRangeTriple.first,
-                dateStart = dateRangeTriple.second,
-                dateEnd = dateRangeTriple.third
+                jtH = jtPair.second
             )
         }
     ) { group1, group2, group3, group4, group5 ->
@@ -2396,10 +2366,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             tunggakanKurang6Bln = group5.tg6,
             jatuhTempoOnly = group5.jt,
             jatuhTempoH = group5.jtH,
-            desa = group4[4],
-            dateRangeField = group5.dateField,
-            dateRangeStart = group5.dateStart,
-            dateRangeEnd = group5.dateEnd
+            desa = group4[4]
         )
     }
 
@@ -3019,19 +2986,6 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
                     else -> true
                 }
             }
-        }
-
-        // 9. Date Range filter (Real-time narrowing by Tgl Realisasi or Tgl Lunas)
-        if (filterParams.dateRangeStart.isNotBlank() || filterParams.dateRangeEnd.isNotBlank()) {
-            val field = com.example.ui.components.CustomerDateField.fromKey(filterParams.dateRangeField)
-            val startLocal = DateTenorUtils.parseIsoLocalDate(filterParams.dateRangeStart)
-            val endLocal = DateTenorUtils.parseIsoLocalDate(filterParams.dateRangeEnd)
-            filteredList = com.example.ui.components.filterCustomersByDateRange(
-                customers = filteredList,
-                field = field,
-                startDate = startLocal,
-                endDate = endLocal
-            )
         }
 
         filteredList
@@ -3756,10 +3710,7 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             tunggakanKurang6Bln = filterTunggakanKurang6Bln.value,
             jatuhTempoOnly = filterJatuhTempoOnly.value,
             jatuhTempoH = selectedJatuhTempoH.value,
-            desa = filterDesa.value,
-            dateRangeField = filterDateRangeField.value,
-            dateRangeStart = filterDateRangeStart.value,
-            dateRangeEnd = filterDateRangeEnd.value
+            desa = filterDesa.value
         )
         menuFilterCache[oldMenu] = currentFilters
         saveMenuFiltersToPrefs(oldMenu, currentFilters)
@@ -3789,9 +3740,6 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
             filterJatuhTempoOnly.value = newFilters.jatuhTempoOnly
             selectedJatuhTempoH.value = newFilters.jatuhTempoH
             filterDesa.value = newFilters.desa
-            filterDateRangeField.value = newFilters.dateRangeField
-            filterDateRangeStart.value = newFilters.dateRangeStart
-            filterDateRangeEnd.value = newFilters.dateRangeEnd
 
             selectedMenu.value = menu
             menuFilterCache[menu] = newFilters
@@ -3824,8 +3772,6 @@ class CustomerViewModel(application: Application) : AndroidViewModel(application
         filterTucil.value = false
         filterTunggakanKurang6Bln.value = false
         filterJatuhTempoOnly.value = false
-        filterDateRangeStart.value = ""
-        filterDateRangeEnd.value = ""
     }
 
     fun checkAndRefreshIfEmpty(menu: String) {

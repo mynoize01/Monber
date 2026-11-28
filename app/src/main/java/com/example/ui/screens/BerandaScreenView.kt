@@ -2169,17 +2169,18 @@ private fun RealisasiBarChartCard(
                     }
                 }
 
-                // Borderless Top Metrics: Realisasi (belakang) & Netdisburse (depan)
+                // Borderless Top Metrics: Realisasi (kiri) & Netdisburse (kanan) sejajar secara horizontal
                 // Info debitur dan % dari Realisasi berada di sebelah kanan info angkanya
-                Column(
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .weight(1f)
                             .testTag("chart_metric_realisasi"),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -2193,7 +2194,7 @@ private fun RealisasiBarChartCard(
                             )
                             Text(
                                 text = "Realisasi",
-                                fontSize = 10.5.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White.copy(alpha = 0.88f),
                                 maxLines = 1
@@ -2202,13 +2203,13 @@ private fun RealisasiBarChartCard(
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             val realText = formatFullIdr(totalRealisasi, formatter)
                             Text(
                                 text = realText,
-                                fontSize = adaptiveOsFontSize(realText, maxSp = 14f),
-                                letterSpacing = (-0.25).sp,
+                                fontSize = adaptiveOsFontSize(realText, maxSp = 11.4f),
+                                letterSpacing = (-0.3).sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color.White,
                                 maxLines = 1,
@@ -2220,19 +2221,19 @@ private fun RealisasiBarChartCard(
                                 color = Color.White.copy(alpha = 0.14f)
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Person,
                                         contentDescription = "Debitur",
                                         tint = Color(0xFFBAE6FD),
-                                        modifier = Modifier.size(11.dp)
+                                        modifier = Modifier.size(9.dp)
                                     )
                                     Text(
-                                        text = "${formatter.format(totalDeb)} Debitur",
-                                        fontSize = 10.sp,
+                                        text = "${formatter.format(totalDeb)} Deb",
+                                        fontSize = 8.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFFE0F2FE),
                                         maxLines = 1
@@ -2242,11 +2243,18 @@ private fun RealisasiBarChartCard(
                         }
                     }
 
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(34.dp)
+                            .background(Color.White.copy(alpha = 0.18f))
+                    )
+
                     Column(
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .weight(1f)
                             .testTag("chart_metric_netdisburs"),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -2259,7 +2267,7 @@ private fun RealisasiBarChartCard(
                             )
                             Text(
                                 text = "Netdisburse",
-                                fontSize = 10.5.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White.copy(alpha = 0.88f),
                                 maxLines = 1
@@ -2268,13 +2276,13 @@ private fun RealisasiBarChartCard(
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             val netText = formatSignedFullIdr(totalNetDisburs, formatter)
                             Text(
                                 text = netText,
-                                fontSize = adaptiveOsFontSize(netText, maxSp = 14f),
-                                letterSpacing = (-0.25).sp,
+                                fontSize = adaptiveOsFontSize(netText, maxSp = 11.4f),
+                                letterSpacing = (-0.3).sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color(0xFFA7F3D0),
                                 maxLines = 1,
@@ -2286,13 +2294,13 @@ private fun RealisasiBarChartCard(
                                 color = Color(0xFF10B981).copy(alpha = 0.22f)
                             ) {
                                 Text(
-                                    text = "${String.format(Locale.US, "%.1f", netRatioPct)}% dari Realisasi",
-                                    fontSize = 10.sp,
+                                    text = "${String.format(Locale.US, "%.1f", netRatioPct)}%",
+                                    fontSize = 8.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFFA7F3D0),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
                                 )
                             }
                         }
@@ -5054,7 +5062,7 @@ private fun BerandaAlertMiniCard(
 ) {
     Surface(
         modifier = modifier
-            .heightIn(min = 78.dp)
+            .heightIn(min = 68.dp)
             .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
@@ -5064,32 +5072,43 @@ private fun BerandaAlertMiniCard(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 7.dp, vertical = 9.dp),
+                .padding(horizontal = 7.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                text = title,
-                fontSize = 10.sp,
-                lineHeight = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = accentColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 9.5.sp,
+                    lineHeight = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = accentColor,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 4.dp)
+                )
 
-            BerandaDebtorCountBadge(
-                countText = debText,
-                accentColor = if (hasDebtors) accentColor else Color(0xFF94A3B8),
-                contentDescription = "Debitur $title",
-                iconSize = 11.dp,
-                fontSize = 11.sp,
-                horizontalPadding = 7.dp,
-                verticalPadding = 2.5.dp
-            )
+                BerandaDebtorCountBadge(
+                    countText = debText,
+                    accentColor = if (hasDebtors) accentColor else Color(0xFF94A3B8),
+                    contentDescription = "Debitur $title",
+                    iconSize = 8.dp,
+                    fontSize = 8.5.sp,
+                    horizontalPadding = 4.5.dp,
+                    verticalPadding = 1.5.dp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
 
             Text(
                 text = osText,
-                fontSize = adaptiveOsFontSize(osText, maxSp = 11.8f),
+                fontSize = adaptiveOsFontSize(osText, maxSp = 12f),
                 letterSpacing = (-0.3).sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color(0xFF0F172A),

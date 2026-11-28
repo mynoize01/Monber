@@ -157,55 +157,6 @@ object DateTenorUtils {
         return parsed.first.toString()
     }
 
-    fun parseLocalDate(dateStr: String): LocalDate? {
-        val (y, m, d) = parseYearMonthDay(dateStr) ?: return null
-        return try {
-            val maxDay = java.time.YearMonth.of(y, m).lengthOfMonth()
-            LocalDate.of(y, m, d.coerceIn(1, maxDay))
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    fun parseIsoLocalDate(isoStr: String): LocalDate? {
-        val clean = isoStr.trim()
-        if (clean.isBlank()) return null
-        return try {
-            LocalDate.parse(clean)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    fun utcMillisToLocalDate(millis: Long?): LocalDate? {
-        if (millis == null) return null
-        return try {
-            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-                timeInMillis = millis
-            }
-            LocalDate.of(
-                cal.get(java.util.Calendar.YEAR),
-                cal.get(java.util.Calendar.MONTH) + 1,
-                cal.get(java.util.Calendar.DAY_OF_MONTH)
-            )
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    fun localDateToUtcMillis(date: LocalDate?): Long? {
-        if (date == null) return null
-        return try {
-            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-                clear()
-                set(date.year, date.monthValue - 1, date.dayOfMonth, 0, 0, 0)
-            }
-            cal.timeInMillis
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     fun monthsElapsedSince(tglReal: String, now: LocalDate = LocalDate.now()): Int? {
         val (y, m, _) = parseYearMonthDay(tglReal) ?: return null
         val elapsed = (now.year - y) * 12 + (now.monthValue - m)
