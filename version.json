@@ -1,10 +1,10 @@
 {
-  "versionCode": 17,
-  "versionName": "1.5.6",
-  "tagName": "v1.5.6",
-  "releaseName": "MonBer v1.5.6",
-  "releaseNotes": "Pembaruan MonBer v1.5.6: pembaruan background Beranda, penempatan badge debitur di pojok kanan tombol Tusim/Tucil/Tunggakan dengan ukuran lebih ringkas, dan tata letak sejajar horizontal untuk info Realisasi serta Netdisburse pada chart batang.",
-  "apkUrl": "https://github.com/mynoize01/Monber/releases/download/v1.5.6/MonBer-v1.5.6.apk",
-  "htmlUrl": "https://github.com/mynoize01/Monber/releases/tag/v1.5.6",
+  "versionCode": 18,
+  "versionName": "1.5.7",
+  "tagName": "v1.5.7",
+  "releaseName": "MonBer v1.5.7",
+  "releaseNotes": "Pembaruan MonBer v1.5.7: pembaruan logo aplikasi dan ikon peluncur, serta ukuran logo yang lebih besar dan jelas pada layar Beranda.",
+  "apkUrl": "https://github.com/mynoize01/Monber/releases/download/v1.5.7/MonBer-v1.5.7.apk",
+  "htmlUrl": "https://github.com/mynoize01/Monber/releases/tag/v1.5.7",
   "apkSizeBytes": 0
 }

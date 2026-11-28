@@ -809,7 +809,7 @@ fun DashboardScreen(
                                     verticalArrangement = Arrangement.Center
                                 ) {
                                     androidx.compose.foundation.Image(
-                                        painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.monber9),
+                                        painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.logobaru1),
                                         contentDescription = "Logo MonBer",
                                         contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                                         modifier = Modifier
@@ -5265,9 +5265,12 @@ fun DashboardScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     androidx.compose.foundation.Image(
-                                        painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.monber9),
+                                        painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.logobaru1),
                                         contentDescription = "Logo MonBer",
-                                        modifier = Modifier.size(36.dp)
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                                        modifier = Modifier
+                                            .height(36.dp)
+                                            .wrapContentWidth()
                                     )
                                     Column {
                                         Row(verticalAlignment = Alignment.Bottom) {

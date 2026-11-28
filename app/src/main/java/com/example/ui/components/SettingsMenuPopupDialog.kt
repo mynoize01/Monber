@@ -273,7 +273,6 @@ fun SettingsMenuPopupDialog(
                             SettingsPopupPage.APP_PREFERENCES -> {
                                 AppPreferencesSubPage(
                                     viewModel = viewModel,
-                                    context = context,
                                     isOfflineModeEnabled = isOfflineModeEnabled,
                                     offlineNames = mapOf(
                                         "url_1" to offlineNameUrl1,
@@ -286,10 +285,6 @@ fun SettingsMenuPopupDialog(
                                         "di319_url" to offlineNameDi319Url,
                                         "lw325_daily_url" to offlineNameLw325Daily
                                     ),
-                                    appUpdateState = appUpdateState,
-                                    notificationPermissionLauncher = notificationPermissionLauncher,
-                                    installPermissionLauncher = installPermissionLauncher,
-                                    onMarkManualUpdateCheck = onMarkManualUpdateCheck,
                                     onPickOfflineFile = onPickOfflineFile,
                                     onOpenEditWa = onOpenEditWa,
                                     onBack = { currentPage = SettingsPopupPage.MENU }
@@ -304,8 +299,13 @@ fun SettingsMenuPopupDialog(
 
                             SettingsPopupPage.ABOUT_MONBER -> {
                                 AboutMonberSubPage(
+                                    viewModel = viewModel,
+                                    context = context,
                                     lastSyncText = lastSyncText,
-                                    onOpenUpdateSection = { currentPage = SettingsPopupPage.APP_PREFERENCES },
+                                    appUpdateState = appUpdateState,
+                                    notificationPermissionLauncher = notificationPermissionLauncher,
+                                    installPermissionLauncher = installPermissionLauncher,
+                                    onMarkManualUpdateCheck = onMarkManualUpdateCheck,
                                     onBack = { currentPage = SettingsPopupPage.MENU }
                                 )
                             }
@@ -595,8 +595,6 @@ private fun MainPopupMenuList(
         PopupMenuRowItem(
             icon = Icons.Default.Settings,
             label = "Pengaturan Aplikasi",
-            badgeText = if (hasAvailableUpdate) "Update" else null,
-            badgeIsAlert = hasAvailableUpdate,
             isSelected = selectedBottomNav == "SETTING",
             onClick = onSelectAppPreferences,
             testTag = "popup_menu_app_preferences"
@@ -613,6 +611,8 @@ private fun MainPopupMenuList(
         PopupMenuRowItem(
             icon = Icons.Default.Info,
             label = "Tentang Monber",
+            badgeText = if (hasAvailableUpdate) "Update" else null,
+            badgeIsAlert = hasAvailableUpdate,
             isSelected = false,
             onClick = onSelectAbout,
             testTag = "popup_menu_tentang"
@@ -723,13 +723,8 @@ private fun SubPageHeader(
 @Composable
 private fun AppPreferencesSubPage(
     viewModel: CustomerViewModel,
-    context: Context,
     isOfflineModeEnabled: Boolean,
     offlineNames: Map<String, String>,
-    appUpdateState: AppUpdateState,
-    notificationPermissionLauncher: ActivityResultLauncher<String>,
-    installPermissionLauncher: ActivityResultLauncher<Intent>,
-    onMarkManualUpdateCheck: () -> Unit,
     onPickOfflineFile: (String) -> Unit,
     onOpenEditWa: () -> Unit,
     onBack: () -> Unit
@@ -925,111 +920,6 @@ private fun AppPreferencesSubPage(
                     )
                 }
             }
-
-            // 3. Check for Update (Tepat di bawah tombol pengeditan teks WA)
-            val isUpdateBusy = appUpdateState is AppUpdateState.Checking ||
-                appUpdateState is AppUpdateState.Downloading ||
-                appUpdateState is AppUpdateState.Installing
-
-            Button(
-                onClick = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                        !AppUpdateManager.hasNotificationPermission(context)
-                    ) {
-                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    }
-                    when (appUpdateState) {
-                        is AppUpdateState.NeedsInstallPermission -> {
-                            installPermissionLauncher.launch(
-                                AppUpdateManager.createInstallPermissionIntent(context)
-                            )
-                        }
-                        is AppUpdateState.ReadyToInstall -> {
-                            if (AppUpdateManager.canRequestPackageInstalls(context)) {
-                                viewModel.retryInstallAfterPermissionGranted()
-                            } else {
-                                installPermissionLauncher.launch(
-                                    AppUpdateManager.createInstallPermissionIntent(context)
-                                )
-                            }
-                        }
-                        else -> {
-                            onMarkManualUpdateCheck()
-                            viewModel.checkForUpdates(
-                                autoInstallOnFind = true,
-                                isAutoBackgroundCheck = false
-                            )
-                        }
-                    }
-                },
-                enabled = !isUpdateBusy,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF005FAF),
-                    disabledContainerColor = Color(0xFF005FAF).copy(alpha = 0.7f)
-                ),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp)
-                    .testTag("check_for_update_button")
-            ) {
-                when (appUpdateState) {
-                    is AppUpdateState.Checking -> {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Memeriksa Pembaruan...", fontWeight = FontWeight.Bold)
-                    }
-                    is AppUpdateState.Downloading -> {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Mengunduh ${appUpdateState.progressPercent}%...", fontWeight = FontWeight.Bold)
-                    }
-                    is AppUpdateState.Installing -> {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Menyiapkan Instalasi...", fontWeight = FontWeight.Bold)
-                    }
-                    is AppUpdateState.NeedsInstallPermission -> {
-                        Icon(
-                            imageVector = Icons.Default.SystemUpdate,
-                            contentDescription = "Izinkan Instalasi",
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Izinkan & Instal Update", fontWeight = FontWeight.Bold)
-                    }
-                    is AppUpdateState.ReadyToInstall -> {
-                        Icon(
-                            imageVector = Icons.Default.SystemUpdate,
-                            contentDescription = "Instal Update",
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Instal Update (${appUpdateState.release.tagName})", fontWeight = FontWeight.Bold)
-                    }
-                    else -> {
-                        Icon(
-                            imageVector = Icons.Default.SystemUpdate,
-                            contentDescription = "Check for Update",
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Check for Update", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
         }
     }
 }
@@ -1092,8 +982,13 @@ private fun HelpGuideSubPage(
 
 @Composable
 private fun AboutMonberSubPage(
+    viewModel: CustomerViewModel,
+    context: Context,
     lastSyncText: String,
-    onOpenUpdateSection: () -> Unit,
+    appUpdateState: AppUpdateState,
+    notificationPermissionLauncher: ActivityResultLauncher<String>,
+    installPermissionLauncher: ActivityResultLauncher<Intent>,
+    onMarkManualUpdateCheck: () -> Unit,
     onBack: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -1121,7 +1016,7 @@ private fun AboutMonberSubPage(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Image(
-                        painter = painterResource(id = R.drawable.monber9),
+                        painter = painterResource(id = R.drawable.logobaru1),
                         contentDescription = "Logo MonBer",
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
@@ -1178,26 +1073,112 @@ private fun AboutMonberSubPage(
                 }
             }
 
+            val isUpdateBusy = appUpdateState is AppUpdateState.Checking ||
+                appUpdateState is AppUpdateState.Downloading ||
+                appUpdateState is AppUpdateState.Installing
+
             Button(
-                onClick = onOpenUpdateSection,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005FAF)),
+                onClick = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        !AppUpdateManager.hasNotificationPermission(context)
+                    ) {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    when (appUpdateState) {
+                        is AppUpdateState.NeedsInstallPermission -> {
+                            installPermissionLauncher.launch(
+                                AppUpdateManager.createInstallPermissionIntent(context)
+                            )
+                        }
+                        is AppUpdateState.ReadyToInstall -> {
+                            if (AppUpdateManager.canRequestPackageInstalls(context)) {
+                                viewModel.retryInstallAfterPermissionGranted()
+                            } else {
+                                installPermissionLauncher.launch(
+                                    AppUpdateManager.createInstallPermissionIntent(context)
+                                )
+                            }
+                        }
+                        else -> {
+                            onMarkManualUpdateCheck()
+                            viewModel.checkForUpdates(
+                                autoInstallOnFind = true,
+                                isAutoBackgroundCheck = false
+                            )
+                        }
+                    }
+                },
+                enabled = !isUpdateBusy,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF005FAF),
+                    disabledContainerColor = Color(0xFF005FAF).copy(alpha = 0.7f)
+                ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 48.dp)
                     .testTag("about_check_update_button")
             ) {
-                Icon(
-                    imageVector = Icons.Default.SystemUpdate,
-                    contentDescription = "Check Update",
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Check Update",
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                when (appUpdateState) {
+                    is AppUpdateState.Checking -> {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Memeriksa Pembaruan...", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                    is AppUpdateState.Downloading -> {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Mengunduh ${appUpdateState.progressPercent}%...", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                    is AppUpdateState.Installing -> {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Menyiapkan Instalasi...", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                    is AppUpdateState.NeedsInstallPermission -> {
+                        Icon(
+                            imageVector = Icons.Default.SystemUpdate,
+                            contentDescription = "Izinkan Instalasi",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Izinkan & Instal Update", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                    is AppUpdateState.ReadyToInstall -> {
+                        Icon(
+                            imageVector = Icons.Default.SystemUpdate,
+                            contentDescription = "Instal Update",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Instal Update (${appUpdateState.release.tagName})", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                    else -> {
+                        Icon(
+                            imageVector = Icons.Default.SystemUpdate,
+                            contentDescription = "Check for Update",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Check for Update",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
         }
     }

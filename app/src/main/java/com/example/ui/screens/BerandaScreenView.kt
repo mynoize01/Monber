@@ -1162,22 +1162,22 @@ fun BerandaScreenView(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = statusBarTopPadding + 8.dp, bottom = 20.dp)
+                    .padding(top = statusBarTopPadding + 8.dp, bottom = 16.dp)
                     .padding(horizontal = 18.dp)
             ) {
                 // Top Brand & Action Icons Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.Top
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Image(
-                            painter = painterResource(id = R.drawable.monber9),
+                            painter = painterResource(id = R.drawable.logobaru1),
                             contentDescription = "Logo MONBER!",
                             contentScale = ContentScale.Fit,
                             modifier = Modifier
-                                .height(56.dp)
+                                .height(80.dp)
                                 .wrapContentWidth()
                         )
                         Text(
