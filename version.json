@@ -1,10 +1,10 @@
 {
-  "versionCode": 10,
-  "versionName": "1.4.9",
-  "tagName": "v1.4.9",
-  "releaseName": "MonBer v1.4.9",
-  "releaseNotes": "Penambahan kartu Nasabah DH New (LW325 Daily bulan PH berjalan), pembaruan kartu Nasabah NPL Lunas (seluruh NPL yang lunas), serta pemindahan tombol Check for Update ke dalam popup Pengaturan Aplikasi.",
-  "apkUrl": "https://github.com/mynoize01/Monber/releases/download/v1.4.9/MonBer-v1.4.9.apk",
-  "htmlUrl": "https://github.com/mynoize01/Monber/releases/tag/v1.4.9",
+  "versionCode": 15,
+  "versionName": "1.5.4",
+  "tagName": "v1.5.4",
+  "releaseName": "MonBer v1.5.4",
+  "releaseNotes": "Pembaruan MonBer v1.5.4: animasi popup daftar nasabah, halaman daftar nasabah terpisah untuk Kualitas & Segmen, lazy loading daftar nasabah, dan perbaikan konfigurasi keystore serta build APK.",
+  "apkUrl": "https://github.com/mynoize01/Monber/releases/download/v1.5.4/MonBer-v1.5.4.apk",
+  "htmlUrl": "https://github.com/mynoize01/Monber/releases/tag/v1.5.4",
   "apkSizeBytes": 0
 }

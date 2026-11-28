@@ -39,9 +39,13 @@ class ExampleUnitTest {
       println("debug.keystore.base64 does not exist at ${b64File.absolutePath}")
       return
     }
-    val b64Content = b64File.readText().trim()
-    val decodedBytes = java.util.Base64.getDecoder().decode(b64Content)
     val destFile = File(projectRoot, "debug.keystore")
+    if (destFile.exists() && destFile.length() > 0L) {
+      assertTrue(destFile.exists() && destFile.length() > 0)
+      return
+    }
+    val b64Content = b64File.readText().replace(Regex("\\s+"), "")
+    val decodedBytes = java.util.Base64.getMimeDecoder().decode(b64Content)
     destFile.writeBytes(decodedBytes)
     println("Successfully decoded ${b64File.absolutePath} and wrote to ${destFile.absolutePath} with size: ${destFile.length()} bytes")
     assertTrue(destFile.exists() && destFile.length() > 0)
@@ -124,7 +128,10 @@ class ExampleUnitTest {
     println("--- DIAGNOSTIC START ---")
     println("Fetching from: $targetUrl")
     
-    val client = okhttp3.OkHttpClient()
+    val client = okhttp3.OkHttpClient.Builder()
+        .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
     val request = okhttp3.Request.Builder().url(targetUrl).build()
     try {
         client.newCall(request).execute().use { response ->

@@ -89,16 +89,22 @@ jobs:
           gradle.settingsEvaluated {
               dependencyResolutionManagement {
                   repositories {
-                      val mirror = maven {
-                          name = "GoogleMavenCentralMirror"
-                          url = uri("https://maven-central.storage-download.googleapis.com/maven2/")
+                      val alreadyConfigured = any {
+                          it is org.gradle.api.artifacts.repositories.MavenArtifactRepository &&
+                              it.url.toString().contains("maven-central.storage-download.googleapis.com")
                       }
-                      remove(mirror)
-                      val mavenIdx = indexOfFirst { it.name.contains("MavenRepo", ignoreCase = true) }
-                      if (mavenIdx >= 0) {
-                          add(mavenIdx, mirror)
-                      } else {
-                          add(mirror)
+                      if (!alreadyConfigured) {
+                          val mirror = maven {
+                              name = "GoogleMavenCentralMirror"
+                              url = uri("https://maven-central.storage-download.googleapis.com/maven2/")
+                          }
+                          remove(mirror)
+                          val mavenIdx = indexOfFirst { it.name.contains("MavenRepo", ignoreCase = true) }
+                          if (mavenIdx >= 0) {
+                              add(mavenIdx, mirror)
+                          } else {
+                              add(mirror)
+                          }
                       }
                   }
               }
@@ -131,6 +137,36 @@ jobs:
 
           GRADLE_CI_FLAGS="--init-script /tmp/ci-maven-mirror.init.gradle.kts --no-daemon --no-configuration-cache --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3g --stacktrace"
 
+          decode_base64_to_file() {
+            local b64_input="$1"
+            local out_file="$2"
+            B64_INPUT="$b64_input" python3 - "$out_file" <<'PY'
+          import base64, os, re, sys
+
+          raw = os.environ.get("B64_INPUT", "").strip()
+          cleaned = re.sub(r'[\s"\']+', '', raw)
+          if not cleaned:
+              sys.exit(1)
+          cleaned = cleaned.replace('-', '+').replace('_', '/')
+          pad = (-len(cleaned)) % 4
+          if pad:
+              cleaned += '=' * pad
+          try:
+              data = base64.b64decode(cleaned, validate=False)
+          except Exception:
+              sys.exit(1)
+          if not data:
+              sys.exit(1)
+          with open(sys.argv[1], 'wb') as f:
+              f.write(data)
+          PY
+          }
+
+          validate_debug_keystore() {
+            local ks_file="$1"
+            [ -s "$ks_file" ] && keytool -list -keystore "$ks_file" -storepass android -alias androiddebugkey >/dev/null 2>&1
+          }
+
           REF_FULL="${{ github.ref }}"
           if [[ "$REF_FULL" == refs/tags/* ]]; then
             RELEASE_TAG="$REF_NAME"
@@ -146,37 +182,84 @@ jobs:
           echo "Resolved RELEASE_TAG=$RELEASE_TAG"
           echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
 
-          HAS_ANY_RELEASE_SECRET=0
-          if [ -n "$RELEASE_KEYSTORE_BASE64" ] || [ -n "$STORE_PASSWORD" ] || [ -n "$KEY_PASSWORD" ]; then
-            HAS_ANY_RELEASE_SECRET=1
-          fi
+          RELEASE_KS_TRIMMED=$(printf '%s' "$RELEASE_KEYSTORE_BASE64" | tr -d '[:space:]')
+          if [ -n "$RELEASE_KS_TRIMMED" ]; then
+            if [ -z "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
+              export STORE_PASSWORD="$KEY_PASSWORD"
+            fi
+            if [ -z "$KEY_PASSWORD" ] && [ -n "$STORE_PASSWORD" ]; then
+              export KEY_PASSWORD="$STORE_PASSWORD"
+            fi
+            if [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_PASSWORD" ]; then
+              echo "Error: RELEASE_KEYSTORE_BASE64 is configured, but STORE_PASSWORD / KEY_PASSWORD is missing!"
+              exit 1
+            fi
 
-          if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
             echo "Building Release APK using configured GitHub Secrets keystore..."
-            printf '%s' "$RELEASE_KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > my-upload-key.jks
-            if [ ! -s "my-upload-key.jks" ]; then
+            if ! decode_base64_to_file "$RELEASE_KEYSTORE_BASE64" "my-upload-key.jks"; then
               echo "Error: Failed to decode RELEASE_KEYSTORE_BASE64 into my-upload-key.jks!"
               exit 1
             fi
+
+            if ! keytool -list -keystore my-upload-key.jks -storepass "$STORE_PASSWORD" >/dev/null 2>&1; then
+              echo "Error: my-upload-key.jks could not be opened with STORE_PASSWORD!"
+              exit 1
+            fi
+
+            if ! keytool -list -keystore my-upload-key.jks -storepass "$STORE_PASSWORD" -alias upload >/dev/null 2>&1; then
+              DETECTED_ALIASES=$(keytool -list -keystore my-upload-key.jks -storepass "$STORE_PASSWORD" 2>/dev/null | awk -F',' '/PrivateKeyEntry/{gsub(/^[ \t]+|[ \t]+$/, "", $1); print $1}')
+              ALIAS_COUNT=$(printf '%s\n' "$DETECTED_ALIASES" | grep -c . || true)
+              if [ "$ALIAS_COUNT" -eq 1 ]; then
+                SINGLE_ALIAS=$(printf '%s\n' "$DETECTED_ALIASES" | head -n 1)
+                echo "::warning::Alias 'upload' not found in my-upload-key.jks; mapping alias '$SINGLE_ALIAS' -> 'upload' for build."
+                keytool -changealias -keystore my-upload-key.jks -storepass "$STORE_PASSWORD" -alias "$SINGLE_ALIAS" -destalias upload -keypass "$KEY_PASSWORD"
+              else
+                echo "Error: Key alias 'upload' not found in my-upload-key.jks (found aliases: $DETECTED_ALIASES)."
+                exit 1
+              fi
+            fi
+
             export KEYSTORE_PATH="$PWD/my-upload-key.jks"
             $GRADLE_CMD :app:assembleRelease $GRADLE_CI_FLAGS
             APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          elif [ "$HAS_ANY_RELEASE_SECRET" -eq 1 ]; then
-            echo "Error: Release keystore secrets are only partially configured!"
-            echo "Set ALL three secrets (RELEASE_KEYSTORE_BASE64, STORE_PASSWORD, KEY_PASSWORD) or remove all three."
-            exit 1
           else
-            echo "Release keystore secrets not configured; preparing Debug APK keystore..."
-            if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
-              echo "Decoding debug.keystore from DEBUG_KEYSTORE_BASE64 GitHub Secret..."
-              printf '%s' "$DEBUG_KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > debug.keystore
-            elif [ -s "debug.keystore.base64" ]; then
-              echo "Decoding debug.keystore from repository debug.keystore.base64..."
-              tr -d '\r\n ' < debug.keystore.base64 | base64 -d > debug.keystore
-            elif [ -s "debug.keystore" ]; then
-              echo "::warning::Using cached debug.keystore. Add DEBUG_KEYSTORE_BASE64 to GitHub Secrets for permanent consistent signing."
+            if [ -n "$STORE_PASSWORD" ] || [ -n "$KEY_PASSWORD" ]; then
+              echo "::warning::STORE_PASSWORD or KEY_PASSWORD is set without RELEASE_KEYSTORE_BASE64; falling back to Debug APK keystore."
             else
-              echo "::warning::debug.keystore.base64 not found and no cache available; generating debug.keystore (will be cached across runs). Add DEBUG_KEYSTORE_BASE64 to GitHub Secrets for permanent consistent signing."
+              echo "Release keystore secrets not configured; preparing Debug APK keystore..."
+            fi
+
+            DEBUG_READY=0
+            if [ -n "$(printf '%s' "$DEBUG_KEYSTORE_BASE64" | tr -d '[:space:]')" ]; then
+              echo "Decoding debug.keystore from DEBUG_KEYSTORE_BASE64 GitHub Secret..."
+              if decode_base64_to_file "$DEBUG_KEYSTORE_BASE64" "debug.keystore.tmp" && validate_debug_keystore "debug.keystore.tmp"; then
+                mv -f debug.keystore.tmp debug.keystore
+                DEBUG_READY=1
+              else
+                rm -f debug.keystore.tmp
+                echo "::warning::DEBUG_KEYSTORE_BASE64 is invalid or does not match android/androiddebugkey; falling back."
+              fi
+            fi
+
+            if [ "$DEBUG_READY" -eq 0 ] && [ -s "debug.keystore.base64" ]; then
+              echo "Decoding debug.keystore from repository debug.keystore.base64..."
+              if decode_base64_to_file "$(cat debug.keystore.base64)" "debug.keystore.tmp" && validate_debug_keystore "debug.keystore.tmp"; then
+                mv -f debug.keystore.tmp debug.keystore
+                DEBUG_READY=1
+              else
+                rm -f debug.keystore.tmp
+                echo "::warning::Repository debug.keystore.base64 failed validation."
+              fi
+            fi
+
+            if [ "$DEBUG_READY" -eq 0 ] && validate_debug_keystore "debug.keystore"; then
+              echo "::warning::Using cached debug.keystore. Add DEBUG_KEYSTORE_BASE64 to GitHub Secrets for permanent consistent signing."
+              DEBUG_READY=1
+            fi
+
+            if [ "$DEBUG_READY" -eq 0 ]; then
+              rm -f debug.keystore
+              echo "::warning::Generating fresh debug.keystore (will be cached across runs). Add DEBUG_KEYSTORE_BASE64 to GitHub Secrets for permanent consistent signing."
               keytool -genkeypair -noprompt \
                 -keystore debug.keystore \
                 -storepass android \
@@ -186,8 +269,8 @@ jobs:
                 -dname "CN=Android Debug,O=Android,C=US"
             fi
 
-            if [ ! -s "debug.keystore" ]; then
-              echo "Error: debug.keystore is missing or empty!"
+            if ! validate_debug_keystore "debug.keystore"; then
+              echo "Error: debug.keystore is missing, empty, or invalid!"
               exit 1
             fi
 
